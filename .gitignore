@@ -1,0 +1,8 @@
+.DS_Store
+/.build/
+/.swiftpm/
+/build/
+
+# Завантажує scripts/fetch-deps.sh
+/Vendor/
+/Resources/ggml-silero-*.bin
