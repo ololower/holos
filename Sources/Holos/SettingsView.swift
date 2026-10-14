@@ -17,6 +17,18 @@ struct SettingsView: View {
                 Picker("Клавіша", selection: $settings.triggerKey) {
                     ForEach(TriggerKey.allCases) { Text($0.title).tag($0) }
                 }
+                Picker("Мова", selection: $settings.language) {
+                    Text("Автовизначення").tag(DictationLanguage.auto)
+                    Divider()
+                    ForEach(DictationLanguage.pinned) { Text($0.name).tag($0.code) }
+                    Divider()
+                    ForEach(DictationLanguage.others) { Text($0.name).tag($0.code) }
+                }
+                if settings.language == DictationLanguage.auto {
+                    Text("Whisper визначає мову за початком запису. На коротких фразах він може помилятися — наприклад, сприйняти українську як російську. Якщо диктуєте однією мовою, краще вибрати її явно.")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
                 Text("Тримайте клавішу, говоріть, відпустіть — текст з’явиться там, де стоїть курсор. Будь-яка інша клавіша під час запису (наприклад, Esc) скасовує його.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -58,7 +70,7 @@ struct SettingsView: View {
                     TextField("", text: $settings.prompt, prompt: Text("Імена й терміни, які треба писати саме так"), axis: .vertical)
                         .lineLimit(2...4)
                         .labelsHidden()
-                    Text("Наприклад: «Олексій, Kubernetes, PhpStorm, пулреквест». Мова розпізнавання — завжди українська.")
+                    Text("Наприклад: «Олексій, Kubernetes, PhpStorm, пулреквест». Пишіть підказку тією мовою, якою диктуєте.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -114,16 +126,20 @@ struct SettingsView: View {
         let vad = Transcriber.vadModelPath != nil
             ? "\(Transcriber.vadModelName), запас \(Transcriber.vadPaddingMs) мс"
             : "вимкнено (модель не знайдена)"
-        let filtered = Transcriber.hallucinations.sorted().map { "«\($0)»" }.joined(separator: ", ")
+        let language = settings.language == DictationLanguage.auto
+            ? "auto (визначається за першими 30 с)"
+            : "\(settings.language) (\(DictationLanguage.name(for: settings.language).lowercased()), автовизначення вимкнено)"
+        let indent = String(repeating: " ", count: 16)
+        let filtered = Transcriber.hallucinations.sorted().map { "\(indent)«\($0)»" }.joined(separator: "\n")
         return """
         аудіо           16 кГц, моно, лише з пам'яті
-        language        \(Transcriber.language) (автовизначення вимкнено)
+        language        \(language)
         initial_prompt  \(prompt.isEmpty ? "немає" : "«\(prompt)»")
         декодування     beam search, ширина \(Transcriber.beamSize)
         контекст        кожен запис окремо, без попередніх
         VAD             \(vad)
-        фільтр          відкидає результат, якщо це лише
-                        \(filtered)
+        фільтр          відкидає результат, якщо це лише:
+        \(filtered)
                         або згадка Amara.org
         """
     }

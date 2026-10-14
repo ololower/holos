@@ -63,6 +63,11 @@ final class Settings: ObservableObject {
         didSet { defaults.set(triggerKey.rawValue, forKey: "triggerKey") }
     }
 
+    /// Код мови whisper («uk», «en», …) або «auto»
+    @Published var language: String {
+        didSet { defaults.set(language, forKey: "language") }
+    }
+
     /// UID мікрофона з CoreAudio; порожній рядок — системний за замовчуванням
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
@@ -83,6 +88,7 @@ final class Settings: ObservableObject {
 
     private init() {
         triggerKey = TriggerKey(rawValue: defaults.string(forKey: "triggerKey") ?? "") ?? .rightOption
+        language = defaults.string(forKey: "language") ?? DictationLanguage.defaultCode
         microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         modelPath = defaults.string(forKey: "modelPath") ?? Settings.defaultModelPath
         prompt = defaults.string(forKey: "prompt") ?? ""

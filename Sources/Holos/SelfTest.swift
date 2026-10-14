@@ -5,7 +5,7 @@ import SwiftUI
 /// Перевірка розпізнавання з файлу без інтерфейсу й мікрофона.
 /// Аудіо проходить через той самий конвертер, що й запис із мікрофона.
 enum SelfTest {
-    static func run(file: String, modelPath: String, prompt: String) -> Int32 {
+    static func run(file: String, modelPath: String, prompt: String, language: String) -> Int32 {
         let audioFile: AVAudioFile
         do {
             audioFile = try AVAudioFile(forReading: URL(fileURLWithPath: file))
@@ -45,8 +45,9 @@ enum SelfTest {
             print("Підказка: \(transcriber.tokenCount(prompt)) токенів з \(Transcriber.maxPromptTokens)")
         }
         let start = Date()
-        let text = transcriber.transcribe(samples, prompt: prompt)
-        print(String(format: "Розпізнано за %.2f с:", Date().timeIntervalSince(start)))
+        let text = transcriber.transcribe(samples, prompt: prompt, language: language)
+        let detected = language == DictationLanguage.auto ? ", визначено: \(transcriber.lastLanguage ?? "?")" : ""
+        print(String(format: "Розпізнано за %.2f с (мова: %@%@):", Date().timeIntervalSince(start), language, detected))
         print(text)
         return text.isEmpty ? 2 : 0
     }

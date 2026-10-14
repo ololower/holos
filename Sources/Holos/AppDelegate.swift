@@ -48,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.updateStatusItem() }
         }.store(in: &cancellables)
 
+        settings.$language.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateStatusItem() }
+        }.store(in: &cancellables)
+
         settings.$modelPath.dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { [weak self] path in self?.loadModel(path: path) }
@@ -161,8 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.show(.transcribing)
 
         let prompt = settings.prompt
+        let language = settings.language
         work.async { [weak self, transcriber] in
-            let text = transcriber.transcribe(samples, prompt: prompt)
+            let text = transcriber.transcribe(samples, prompt: prompt, language: language)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.phase = .idle
@@ -222,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !status.accessibilityAllowed || !status.microphoneAllowed {
                 symbol = "exclamationmark.triangle"; text = "Потрібні дозволи — відкрийте налаштування"
             } else {
-                text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть"
+                text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть · \(DictationLanguage.name(for: settings.language))"
             }
         }
 

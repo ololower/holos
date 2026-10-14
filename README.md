@@ -2,14 +2,15 @@
 
 # Holos
 
-Офлайн-диктування українською для macOS. Затисніть клавішу, скажіть фразу, відпустіть — текст з'явиться там, де стоїть курсор. Розпізнавання виконує [whisper.cpp](https://github.com/ggml-org/whisper.cpp) прямо на вашому Mac: аудіо не залишає комп'ютер і не записується на диск.
+Офлайн-диктування для macOS — за замовчуванням українською, але можна вибрати будь-яку зі 100 мов Whisper або автовизначення. Затисніть клавішу, скажіть фразу, відпустіть — текст з'явиться там, де стоїть курсор. Розпізнавання виконує [whisper.cpp](https://github.com/ggml-org/whisper.cpp) прямо на вашому Mac: аудіо не залишає комп'ютер і не записується на диск.
 
-*Offline push-to-talk dictation for macOS (Ukrainian only). Speech recognition runs locally via whisper.cpp — no audio ever leaves the machine.*
+*Offline push-to-talk dictation for macOS (Ukrainian by default; any of Whisper's 100 languages or auto-detect). Speech recognition runs locally via whisper.cpp — no audio ever leaves the machine.*
 
 ## Можливості
 
 - **Push-to-talk** на правому ⌥ Option (або правому ⌘, правому ⌃, fn)
 - **Вставка в будь-яку програму** — туди, де курсор
+- **Вибір мови**: українська за замовчуванням, будь-яка зі 100 мов Whisper або автовизначення
 - **Анімація внизу екрана**: запис → розпізнавання → готово
 - **Підказка** для імен і термінів, які треба писати саме так
 - **Детектор мовлення Silero VAD** — на тиші й шумі нічого не вигадує
@@ -106,6 +107,7 @@ Sources/Holos/
   HotkeyMonitor.swift      push-to-talk на клавіші-модифікаторі
   AudioRecorder.swift      мікрофон → 16 кГц моно в пам'яті
   Transcriber.swift        обгортка whisper.cpp і всі параметри розпізнавання
+  Languages.swift          список мов із whisper, назви українською
   TextInserter.swift       вставка через буфер обміну й ⌘V
   OverlayView.swift        анімація-пігулка
   OverlayController.swift  вікно анімації (не перехоплює фокус)
@@ -120,8 +122,11 @@ scripts/                   збирання, залежності, модель,
 Перевірка без мікрофона й інтерфейсу:
 
 ```bash
-# розпізнати аудіофайл
-build/Holos.app/Contents/MacOS/Holos --transcribe фраза.wav [--model шлях.bin] [--prompt "підказка"]
+# розпізнати аудіофайл (мова за замовчуванням — uk)
+build/Holos.app/Contents/MacOS/Holos --transcribe фраза.wav [--model шлях.bin] [--prompt "підказка"] [--language en|auto]
+
+# список мов, які підтримує whisper
+build/Holos.app/Contents/MacOS/Holos --languages
 
 # згенерувати тестову фразу українським голосом macOS (Lesya)
 say -v Lesya -o фраза.aiff "Привіт! Це перевірка розпізнавання."
@@ -137,7 +142,9 @@ scripts/make-icon.sh
 
 ## Відомі обмеження
 
-- Лише Apple Silicon і лише українська мова.
+- Лише Apple Silicon.
+- Перевірялися українська й англійська. Якість для інших мов залежить від того, наскільки добре їх знає Whisper.
+- Автовизначення мови додає близько 0,5 с і на коротких фразах може помилитися (наприклад, сприйняти українську як російську). Якщо диктуєте однією мовою, краще вибрати її явно.
 - У полях паролів і програмах із захищеним введенням (наприклад, Secure Keyboard Entry у терміналі) macOS не передає натискання клавіш, тому диктування там не спрацює.
 - Щоб диктувати на fn, у Системних параметрах → Клавіатура встановіть «Натискання 🌐» на «Нічого не робити».
 - Якість розпізнавання перевірялася переважно на синтетичному голосі macOS; на живому голосі результат може відрізнятися.

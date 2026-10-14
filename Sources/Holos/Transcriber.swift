@@ -16,7 +16,6 @@ enum TranscriberError: LocalizedError {
 /// Обгортка над whisper.cpp. Не потокобезпечна: викликати з однієї послідовної черги.
 final class Transcriber {
     // Параметри розпізнавання. Вікно налаштувань показує саме ці значення.
-    static let language = "uk"
     static let beamSize = 5
     static let vadPaddingMs = 200
     static let vadModelName = "Silero VAD v6.2.0"
@@ -27,6 +26,7 @@ final class Transcriber {
     /// Відкидаються лише тоді, коли це весь результат, а не частина реального тексту.
     static let hallucinations: Set<String> = [
         "дякую за перегляд", "дякуємо за перегляд", "субтитри",
+        "thank you for watching", "thanks for watching",
     ]
     static let hallucinationMarkers = ["amara.org", "субтитри зроблен", "субтитри створ", "субтитрувальниц"]
 
@@ -55,7 +55,8 @@ final class Transcriber {
         context = ctx
     }
 
-    func transcribe(_ input: [Float], prompt: String) -> String {
+    /// `language` — код мови whisper або «auto» (тоді whisper визначає мову за першими 30 с)
+    func transcribe(_ input: [Float], prompt: String, language: String) -> String {
         guard let context, !input.isEmpty else { return "" }
 
         // Трохи тиші в кінці, щоб whisper не обрізав останнє слово, і мінімум 1 с загалом
@@ -76,10 +77,10 @@ final class Transcriber {
         params.suppress_blank = true
         params.suppress_nst = true
 
-        let language = strdup(Self.language)
-        defer { free(language) }
-        params.language = UnsafePointer(language)
-        params.detect_language = false
+        let languageCode = strdup(language)
+        defer { free(languageCode) }
+        params.language = UnsafePointer(languageCode)
+        params.detect_language = false // true означало б «лише визначити мову, без розпізнавання»
 
         // Silero VAD: whisper отримує лише фрагменти з мовленням, тож на тиші й шумі нічого не вигадує
         let vadPath = Self.vadModelPath.flatMap { strdup($0) }
@@ -109,6 +110,12 @@ final class Transcriber {
             }
         }
         return Self.clean(text)
+    }
+
+    /// Мова останнього розпізнавання (корисно для режиму «auto»)
+    var lastLanguage: String? {
+        guard let context else { return nil }
+        return whisper_lang_str(whisper_full_lang_id(context)).map { String(cString: $0) }
     }
 
     /// Скільки токенів підказки модель бере: половина текстового контексту (448 / 2) мінус службовий токен.
