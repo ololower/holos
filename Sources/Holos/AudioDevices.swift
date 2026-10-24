@@ -1,9 +1,21 @@
 import CoreAudio
+import IOKit
 
 struct AudioInputDevice: Identifiable, Hashable {
+    enum Kind {
+        /// Вбудований, USB, Thunderbolt… — те, що варто брати автоматично
+        case wired
+        /// Bluetooth (навушники переходять у режим гарнітури зі звуком гіршої якості), iPhone, AirPlay
+        case wireless
+        /// Віртуальні й агрегатні пристрої — не мікрофони; автоматично не беремо
+        case virtual
+    }
+
     let id: AudioDeviceID
     let uid: String
     let name: String
+    let kind: Kind
+    let isBuiltIn: Bool
 }
 
 enum AudioDevices {
@@ -24,7 +36,9 @@ enum AudioDevices {
                   let uid = stringProperty(id, kAudioDevicePropertyDeviceUID),
                   let name = stringProperty(id, kAudioObjectPropertyName)
             else { return nil }
-            return AudioInputDevice(id: id, uid: uid, name: name)
+            let transport = transportType(id)
+            return AudioInputDevice(id: id, uid: uid, name: name, kind: kind(of: transport),
+                                    isBuiltIn: transport == kAudioDeviceTransportTypeBuiltIn)
         }
     }
 
@@ -40,6 +54,57 @@ enum AudioDevices {
         guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr
         else { return nil }
         return inputs().first { $0.id == id }
+    }
+
+    /// Мікрофон для запису. Вибраний — якщо під'єднаний, навіть Bluetooth: його обрали явно.
+    /// Інакше (або якщо вибрано «Автоматично») — спершу дротові, потім Bluetooth та інші бездротові;
+    /// у кожній групі першим — системний за замовчуванням. Вбудований при закритій кришці пропускаємо:
+    /// він записує лише тишу. Віртуальні пристрої автоматично не беремо.
+    static func resolve(preferredUID: String) -> AudioInputDevice? {
+        let all = inputs()
+        if !preferredUID.isEmpty, let chosen = all.first(where: { $0.uid == preferredUID }) { return chosen }
+
+        let lidClosed = isLidClosed
+        let defaultID = defaultInput()?.id
+        let candidates = all.filter { !(lidClosed && $0.isBuiltIn) }
+        for kind in [AudioInputDevice.Kind.wired, .wireless] {
+            let group = candidates.filter { $0.kind == kind }
+            if let device = group.first(where: { $0.id == defaultID }) ?? group.first { return device }
+        }
+        return nil
+    }
+
+    /// Кришка MacBook закрита (працює із зовнішнім монітором)
+    static var isLidClosed: Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return false }
+        defer { IOObjectRelease(service) }
+        let value = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)
+        return value?.takeRetainedValue() as? Bool ?? false
+    }
+
+    private static func kind(of transport: UInt32) -> AudioInputDevice.Kind {
+        switch transport {
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE, kAudioDeviceTransportTypeAirPlay,
+             kAudioDeviceTransportTypeContinuityCaptureWired, kAudioDeviceTransportTypeContinuityCaptureWireless:
+            return .wireless
+        case kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate:
+            return .virtual
+        default:
+            return .wired
+        }
+    }
+
+    private static func transportType(_ id: AudioDeviceID) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return 0 }
+        return value
     }
 
     private static func inputChannelCount(_ id: AudioDeviceID) -> Int {

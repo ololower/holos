@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum OverlayPhase: Equatable {
-    case hidden, recording, transcribing, done, failed
+    /// handsFree — запис без утримання клавіші
+    case hidden, recording, handsFree, transcribing, done, failed
 }
 
 final class OverlayModel: ObservableObject {
@@ -112,7 +113,7 @@ struct OverlayPill: View {
         switch phase {
         case .hidden, .done, .failed:
             return 0
-        case .recording:
+        case .recording, .handsFree:
             return min(1, pow(level, 0.8) * 1.15) * profile * (0.65 + 0.35 * sin(time * 10 + Double(i) * 1.9))
         case .transcribing:
             // Хвиля, що біжить зліва направо
@@ -122,7 +123,7 @@ struct OverlayPill: View {
 
     private func barColor(_ phase: OverlayPhase, _ i: Int) -> RGB {
         switch phase {
-        case .hidden, .recording:
+        case .hidden, .recording, .handsFree:
             return RGB(0.96, 0.96, 0.98)
         case .transcribing:
             return RGB.palette(Double(i) / Double(Self.barCount) * 0.9 - time * 0.45)
@@ -144,6 +145,14 @@ struct OverlayPill: View {
             context.fill(Path(ellipseIn: CGRect(x: center.x - halo, y: center.y - halo, width: halo * 2, height: halo * 2)),
                          with: .color(red.opacity(0.3)))
             context.fill(Path(ellipseIn: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)), with: .color(red))
+        case .handsFree:
+            // Квадратик «стоп»: клавішу можна відпустити, наступне натискання завершить запис
+            let red = RGB(1, 0.32, 0.32).color
+            let halo = 4.5 + 3.5 * level
+            context.fill(Path(roundedRect: CGRect(x: center.x - halo, y: center.y - halo, width: halo * 2, height: halo * 2),
+                              cornerRadius: halo * 0.45), with: .color(red.opacity(0.3)))
+            context.fill(Path(roundedRect: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8), cornerRadius: 2),
+                         with: .color(red))
         case .transcribing:
             let start = Angle.degrees(time * 400)
             var arc = Path()

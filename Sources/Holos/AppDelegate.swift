@@ -25,26 +25,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var permissionTimer: Timer?
     private var maxDurationTimer: Timer?
 
+    private var terminationSignal: DispatchSourceSignal?
+
     private var phase = Phase.idle { didSet { updateStatusItem() } }
+    /// Поточний запис іде без утримання клавіші
+    private var handsFree = false
     private var recordingStartedAt = Date()
     /// Останні розпізнані тексти, найновіший першим. Лише в пам'яті — до виходу з Holos.
     private var history: [String] = []
     private let historyLimit = 5
     /// Чому зірвався останній запис; показується в меню до наступної спроби
     private var lastError: String?
+    /// Повідомлення в меню до наступного диктування (наприклад, про перезапуск після збою)
+    private var notice: String?
 
     private let minimumDuration = 0.3  // коротше — випадкове натискання
     private let maximumDuration = 180.0 // запобіжник, якщо подія відпускання загубилася
     private let silenceRMS: Float = 0.003
+    /// Скільки ще слухати після відпускання клавіші: кінець останнього слова часто звучить уже після нього
+    private let recordingTail = 0.15
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Log.app.notice("Holos \(Self.version, privacy: .public) запущено")
+        Watchdog.markRunning()
+        handleTerminationSignal()
+        if CommandLine.arguments.contains(Watchdog.afterCrashArgument) {
+            notice = "Holos перезапустився після збою"
+            Log.app.notice("Запущено агентом після збою")
+        }
+        Watchdog.sync(enabled: settings.restartAfterCrash)
         setupStatusItem()
 
         hotkey.key = settings.triggerKey
-        hotkey.onPress = { [weak self] in self?.startRecording() }
-        hotkey.onRelease = { [weak self] in self?.finishRecording() }
+        hotkey.handsFreeEnabled = settings.handsFree
+        hotkey.onStart = { [weak self] in self?.startRecording() }
+        hotkey.onFinish = { [weak self] in self?.finishRecording() }
         hotkey.onCancel = { [weak self] in self?.cancelRecording() }
+        hotkey.onHandsFree = { [weak self] in self?.enterHandsFree() }
         hotkey.start()
+
+        settings.$handsFree.dropFirst().sink { [weak self] enabled in
+            self?.hotkey.handsFreeEnabled = enabled
+        }.store(in: &cancellables)
 
         recorder.onLevel = { [weak self] rms in
             DispatchQueue.main.async { self?.overlay.model.push(rms: rms) }
@@ -73,6 +95,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupPermissions()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        Watchdog.markStopped()
+        // У черзі whisper: якщо якраз іде розпізнавання, дочекаємося його
+        work.sync { transcriber.unload() }
+        Log.app.notice("Holos завершено")
+    }
+
+    /// SIGTERM (pkill, оновлення) — звичайний вихід, а не збій: інакше Watchdog запустив би Holos знову
+    private func handleTerminationSignal() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminationSignal = source
+    }
+
+    static var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        guard let commit = info?["HolosCommit"] as? String else { return short }
+        return "\(short) · \(commit)"
+    }
+
     // MARK: - Дозволи
 
     private func setupPermissions() {
@@ -99,12 +144,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if status.accessibilityAllowed != accessibility {
             status.accessibilityAllowed = accessibility
-            NSLog("Holos: універсальний доступ = %@", accessibility ? "так" : "ні")
+            Log.app.notice("Універсальний доступ: \(accessibility ? "так" : "ні", privacy: .public)")
         }
         let microphone = Permissions.microphoneAllowed
         if status.microphoneAllowed != microphone {
             status.microphoneAllowed = microphone
-            NSLog("Holos: мікрофон = %@", microphone ? "так" : "ні")
+            Log.app.notice("Мікрофон: \(microphone ? "так" : "ні", privacy: .public)")
         }
         updateStatusItem()
     }
@@ -130,10 +175,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startRecording() {
         guard phase == .idle else { return }
         guard case .ready = status.model else {
+            hotkey.reset()
             NSSound.beep()
             return
         }
         lastError = nil
+        notice = nil
+        handsFree = false
         // Мікрофон відкривається у фоні: клавіша й анімація не чекають на нього
         recorder.start(deviceUID: settings.microphoneUID)
         recordingStartedAt = Date()
@@ -141,14 +189,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlay.show(.recording)
         playSound("Tink")
         maxDurationTimer = Timer.scheduledTimer(withTimeInterval: maximumDuration, repeats: false) { [weak self] _ in
+            self?.hotkey.reset()
             self?.finishRecording()
         }
+    }
+
+    private func enterHandsFree() {
+        guard phase == .recording else { return }
+        handsFree = true
+        overlay.show(.handsFree)
+        updateStatusItem()
+    }
+
+    /// Скільки не закривати мікрофон після диктування
+    private var keepMicrophoneOpen: TimeInterval {
+        settings.keepMicrophoneWarm ? Settings.warmMicrophoneSeconds : 0
     }
 
     private func cancelRecording() {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
-        recorder.stop { _ in }
+        recorder.stop(keepOpen: keepMicrophoneOpen) { _ in }
         phase = .idle
         overlay.hide()
     }
@@ -157,8 +218,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func recordingFailed(_ message: String) {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
+        hotkey.reset()
         recorder.stop { _ in }
-        NSLog("Holos: запис не вдався: %@", message)
+        showFailure(message)
+    }
+
+    private func showFailure(_ message: String) {
+        Log.dictation.error("Запис не вдався: \(message, privacy: .public)")
         lastError = message
         phase = .idle
         overlay.show(.failed)
@@ -170,15 +236,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
         let duration = Date().timeIntervalSince(recordingStartedAt)
-        // Поки сесія зупиняється й віддає семпли, нового запису не починаємо
+        // Поки дописується хвіст і сесія віддає семпли, нового запису не починаємо
         phase = .transcribing
-        recorder.stop { [weak self] samples in
-            self?.transcribe(samples, duration: duration)
+        DispatchQueue.main.asyncAfter(deadline: .now() + recordingTail) { [self] in
+            recorder.stop(keepOpen: keepMicrophoneOpen) { [weak self] samples in
+                self?.transcribe(samples, duration: duration)
+            }
         }
     }
 
     private func transcribe(_ samples: [Float], duration: TimeInterval) {
-        guard duration >= minimumDuration, Transcriber.rms(samples) >= silenceRMS else {
+        guard duration >= minimumDuration else {
+            phase = .idle
+            overlay.hide()
+            return
+        }
+        // Справжній мікрофон ніколи не дає рівно нулів — так звучить вимкнений,
+        // наприклад вбудований при закритій кришці
+        if !samples.isEmpty && !samples.contains(where: { $0 != 0 }) {
+            showFailure("Мікрофон передає лише тишу")
+            return
+        }
+        guard Transcriber.rms(samples) >= silenceRMS else {
             phase = .idle
             overlay.hide()
             return
@@ -188,17 +267,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let prompt = settings.prompt
         let language = settings.language
+        let replacements = Replacements(settings.replacements)
+        let seconds = Double(samples.count) / AudioRecorder.sampleRate
+        let started = Date()
         work.async { [weak self, transcriber] in
-            let text = transcriber.transcribe(samples, prompt: prompt, language: language)
+            let text = replacements.apply(to: transcriber.transcribe(samples, prompt: prompt, language: language))
             DispatchQueue.main.async {
                 guard let self else { return }
+                Log.dictation.info("Розпізнано \(seconds, format: .fixed(precision: 1)) с аудіо за \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) с: \(text.count) символів")
                 self.phase = .idle
                 guard !text.isEmpty else {
                     self.overlay.hide()
                     return
                 }
                 self.remember(text)
-                TextInserter.insert(text + " ")
+                TextInserter.insert(text)
                 self.overlay.show(.done)
                 self.overlay.hide(after: 0.7)
             }
@@ -235,6 +318,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
         menu.addItem(.separator())
+        // Видно, яка саме збірка зараз працює
+        let versionItem = NSMenuItem(title: "Версія \(Self.version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         menu.addItem(NSMenuItem(title: "Вийти з Holos", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         updateStatusItem()
@@ -258,13 +345,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             historyMenu.addItem(empty)
             return
         }
-        historyMenu.addItem(.sectionHeader(title: "Клацніть, щоб скопіювати"))
+        historyMenu.addItem(.sectionHeader(title: "Клацніть — скопіювати, з ⌥ — вставити"))
         for text in history {
-            let item = NSMenuItem(title: Self.preview(text), action: #selector(copyRecord(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = text
-            item.toolTip = text
-            historyMenu.addItem(item)
+            let preview = Self.preview(text)
+            let copy = NSMenuItem(title: preview, action: #selector(copyRecord(_:)), keyEquivalent: "")
+            copy.keyEquivalentModifierMask = []
+            // З затиснутим ⌥ пункт підміняється на «Вставити» — як після диктування, там, де курсор
+            let insert = NSMenuItem(title: "Вставити: \(preview)", action: #selector(insertRecord(_:)), keyEquivalent: "")
+            insert.keyEquivalentModifierMask = .option
+            insert.isAlternate = true
+            for item in [copy, insert] {
+                item.target = self
+                item.representedObject = text
+                item.toolTip = text
+                historyMenu.addItem(item)
+            }
         }
         historyMenu.addItem(.separator())
         let clear = NSMenuItem(title: "Очистити", action: #selector(clearHistory), keyEquivalent: "")
@@ -276,15 +371,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         microphoneMenu.removeAllItems()
         let selected = settings.microphoneUID
         let action = #selector(selectMicrophone(_:))
-        let system = AudioDevices.defaultInput().map { "Системний за замовчуванням — \($0.name)" } ?? "Системний за замовчуванням"
-        microphoneMenu.addItem(choice(system, "", selected: selected.isEmpty, action: action))
+        // Показуємо, який мікрофон реально візьмемо: дротовий раніше за Bluetooth
+        let automatic = AudioDevices.resolve(preferredUID: "").map { "Автоматично — \($0.name)" } ?? "Автоматично"
+        microphoneMenu.addItem(choice(automatic, "", selected: selected.isEmpty, action: action))
         microphoneMenu.addItem(.separator())
         let devices = AudioDevices.inputs()
         for device in devices {
             microphoneMenu.addItem(choice(device.name, device.uid, selected: device.uid == selected, action: action))
         }
         if !selected.isEmpty && !devices.contains(where: { $0.uid == selected }) {
-            microphoneMenu.addItem(choice("Від’єднаний мікрофон", selected, selected: true, action: action))
+            let name = settings.microphoneName.isEmpty ? "Вибраний мікрофон" : settings.microphoneName
+            let instead = AudioDevices.resolve(preferredUID: selected).map { ", зараз — \($0.name)" } ?? ""
+            microphoneMenu.addItem(choice("\(name) (від’єднаний\(instead))", selected, selected: true, action: action))
         }
     }
 
@@ -313,6 +411,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for key in TriggerKey.allCases {
             triggerKeyMenu.addItem(choice(key.title, key.rawValue, selected: key == settings.triggerKey, action: #selector(selectTriggerKey(_:))))
         }
+        triggerKeyMenu.addItem(.separator())
+        let handsFree = NSMenuItem(title: "Двічі натиснути — запис без утримання", action: #selector(toggleHandsFree), keyEquivalent: "")
+        handsFree.target = self
+        handsFree.state = settings.handsFree ? .on : .off
+        triggerKeyMenu.addItem(handsFree)
     }
 
     private func submenuItem(_ title: String, _ submenu: NSMenu) -> NSMenuItem {
@@ -347,6 +450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var tint: NSColor?
 
         switch (phase, status.model) {
+        case (.recording, _) where handsFree:
+            text = "Слухаю без утримання… \(settings.triggerKey.shortTitle) — вставити, Esc — скасувати"; tint = .systemRed
         case (.recording, _):
             text = "Слухаю… Відпустіть \(settings.triggerKey.shortTitle), щоб вставити текст"; tint = .systemRed
         case (.transcribing, _):
@@ -360,6 +465,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 symbol = "exclamationmark.triangle"; text = "Потрібні дозволи — відкрийте налаштування"
             } else if let lastError {
                 symbol = "mic.slash"; text = "Запис не вдався: \(lastError)"
+            } else if let notice {
+                text = notice
             } else {
                 text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть · \(DictationLanguage.name(for: settings.language))"
             }
@@ -397,8 +504,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    @objc private func insertRecord(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        // Даємо меню закритися, щоб фокус повернувся в поле, де стоїть курсор
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { TextInserter.insert(text) }
+    }
+
     @objc private func clearHistory() {
         history.removeAll()
+    }
+
+    @objc private func toggleHandsFree() {
+        settings.handsFree.toggle()
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {

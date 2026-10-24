@@ -49,7 +49,28 @@ enum SelfTest {
         let detected = language == DictationLanguage.auto ? ", визначено: \(transcriber.lastLanguage ?? "?")" : ""
         print(String(format: "Розпізнано за %.2f с (мова: %@%@):", Date().timeIntervalSince(start), language, detected))
         print(text)
+        let replaced = Replacements(Settings.shared.replacements).apply(to: text)
+        if replaced != text {
+            print("Після замін:")
+            print(replaced)
+        }
         return text.isEmpty ? 2 : 0
+    }
+
+    /// Те, що відбувається з текстом після whisper: заміни й пробіли за символами навколо курсора.
+    /// `before`/`after` — символ перед і після курсора; «край» — початок чи кінець поля; без них — поле,
+    /// яке не віддає цього через Accessibility.
+    static func postprocess(_ text: String, rules: String, before: String?, after: String?) -> Int32 {
+        let replacements = Replacements(rules)
+        print("Правил: \(replacements.rules.count)")
+        let replaced = replacements.apply(to: text)
+        print("Після замін: «\(replaced)»")
+        func character(_ value: String?) -> Character? { value == "край" ? nil : value?.first }
+        let around = before == nil && after == nil
+            ? nil
+            : TextInserter.Surroundings(before: character(before ?? "край"), after: character(after ?? "край"))
+        print("Вставиться: «\(TextInserter.spaced(replaced, around: around))»")
+        return 0
     }
 
     /// Запис із мікрофона без інтерфейсу — тим самим AudioRecorder, що й під час диктування.
@@ -58,7 +79,9 @@ enum SelfTest {
         let recorder = AudioRecorder()
         var failure: String?
         recorder.onFailure = { failure = $0 }
-        print("Мікрофон: \(deviceUID.isEmpty ? "системний за замовчуванням" : deviceUID)")
+        let device = AudioDevices.resolve(preferredUID: deviceUID)
+        let mode = deviceUID.isEmpty ? "автоматично" : (device?.uid == deviceUID ? "вибраний" : "вибраний від'єднаний, замість нього")
+        print("Мікрофон (\(mode)): \(device?.name ?? "немає")")
         recorder.start(deviceUID: deviceUID)
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 
@@ -83,6 +106,7 @@ enum SelfTest {
             ("Запис — тиша", [.recording], -10, 0.0005, 0),
             ("Запис — говорите", [.recording], -10, 0.08, 0.02),
             ("Запис — інший момент", [.recording], -10, 0.08, 0.09),
+            ("Запис без утримання", [.recording, .handsFree], -10, 0.08, 0.02),
             ("Перехід у розпізнавання", [.recording, .transcribing], 0, 0.08, 0.17),
             ("Розпізнавання", [.recording, .transcribing], -10, nil, 0.3),
             ("Розпізнавання +0,25 с", [.recording, .transcribing], -10, nil, 0.55),

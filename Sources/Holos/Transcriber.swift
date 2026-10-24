@@ -42,6 +42,13 @@ final class Transcriber {
 
     var isLoaded: Bool { context != nil }
 
+    /// Звільняє модель. Перед виходом обов'язково: інакше статичні деструктори ggml Metal під час exit()
+    /// натрапляють на ще живі буфери й викликають abort() — кожен вихід ставав «аварійним».
+    func unload() {
+        if let context { whisper_free(context) }
+        context = nil
+    }
+
     func load(path: String) throws {
         if let context {
             whisper_free(context)

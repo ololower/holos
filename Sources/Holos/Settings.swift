@@ -47,10 +47,17 @@ enum TriggerKey: String, CaseIterable, Identifiable {
 final class Settings: ObservableObject {
     static let shared = Settings()
 
-    static var modelsDirectory: URL {
+    static var supportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Holos/models", isDirectory: true)
+            .appendingPathComponent("Holos", isDirectory: true)
     }
+
+    static var modelsDirectory: URL {
+        supportDirectory.appendingPathComponent("models", isDirectory: true)
+    }
+
+    /// Скільки мікрофон лишається відкритим після диктування, якщо ввімкнено keepMicrophoneWarm
+    static let warmMicrophoneSeconds = 10.0
 
     static var defaultModelPath: String {
         // Повна large-v3 помітно точніша для української, ніж turbo; turbo — удвічі швидша
@@ -68,9 +75,37 @@ final class Settings: ObservableObject {
         didSet { defaults.set(language, forKey: "language") }
     }
 
-    /// UID мікрофона з CoreAudio; порожній рядок — системний за замовчуванням
+    /// UID мікрофона з CoreAudio; порожній рядок — «Автоматично» (див. AudioDevices.resolve)
     @Published var microphoneUID: String {
-        didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
+        didSet {
+            defaults.set(microphoneUID, forKey: "microphoneUID")
+            // Назву запам'ятовуємо, щоб показати, який саме мікрофон від'єднано
+            if let device = AudioDevices.inputs().first(where: { $0.uid == microphoneUID }) { microphoneName = device.name }
+        }
+    }
+
+    @Published var microphoneName: String {
+        didSet { defaults.set(microphoneName, forKey: "microphoneName") }
+    }
+
+    /// Подвійне натискання клавіші — запис без утримання
+    @Published var handsFree: Bool {
+        didSet { defaults.set(handsFree, forKey: "handsFree") }
+    }
+
+    /// Не закривати мікрофон одразу після диктування, щоб наступне почалося миттєво
+    @Published var keepMicrophoneWarm: Bool {
+        didSet { defaults.set(keepMicrophoneWarm, forKey: "keepMicrophoneWarm") }
+    }
+
+    /// Заміни після розпізнавання, по одній на рядок: «що → на що» (див. Replacements)
+    @Published var replacements: String {
+        didSet { defaults.set(replacements, forKey: "replacements") }
+    }
+
+    /// Запускати Holos знову, якщо він аварійно завершився (див. Watchdog)
+    @Published var restartAfterCrash: Bool {
+        didSet { defaults.set(restartAfterCrash, forKey: "restartAfterCrash") }
     }
 
     @Published var modelPath: String {
@@ -90,9 +125,19 @@ final class Settings: ObservableObject {
         triggerKey = TriggerKey(rawValue: defaults.string(forKey: "triggerKey") ?? "") ?? .rightOption
         language = defaults.string(forKey: "language") ?? DictationLanguage.defaultCode
         microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
+        microphoneName = defaults.string(forKey: "microphoneName") ?? ""
         modelPath = defaults.string(forKey: "modelPath") ?? Settings.defaultModelPath
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
+        handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
+        keepMicrophoneWarm = defaults.bool(forKey: "keepMicrophoneWarm")
+        replacements = defaults.string(forKey: "replacements") ?? ""
+        restartAfterCrash = defaults.object(forKey: "restartAfterCrash") as? Bool ?? true
+        // Для мікрофона, вибраного до появи microphoneName
+        if microphoneName.isEmpty, !microphoneUID.isEmpty,
+           let device = AudioDevices.inputs().first(where: { $0.uid == microphoneUID }) {
+            microphoneName = device.name
+        }
     }
 }
 

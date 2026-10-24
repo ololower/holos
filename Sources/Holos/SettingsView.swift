@@ -9,6 +9,7 @@ struct SettingsView: View {
     @ObservedObject private var settings = Settings.shared
     @ObservedObject private var status = AppStatus.shared
     @State private var microphones: [AudioInputDevice] = []
+    @State private var automaticMicrophone: AudioInputDevice?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
@@ -32,6 +33,12 @@ struct SettingsView: View {
                 Text("Тримайте клавішу, говоріть, відпустіть — текст з’явиться там, де стоїть курсор. Будь-яка інша клавіша під час запису (наприклад, Esc) скасовує його.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                Toggle("Двічі натиснути — запис без утримання", isOn: $settings.handsFree)
+                if settings.handsFree {
+                    Text("Двічі коротко натисніть клавішу й говоріть, скільки треба (до 3 хв). Натисніть її ще раз — текст вставиться; Esc — скасувати.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 if settings.triggerKey == .fn {
                     Text("Для fn у Системних параметрах → Клавіатура встановіть «Натискання 🌐» на «Нічого не робити».")
                         .font(.callout)
@@ -43,15 +50,25 @@ struct SettingsView: View {
 
             Section {
                 Picker("Мікрофон", selection: $settings.microphoneUID) {
-                    Text("Системний за замовчуванням").tag("")
+                    Text(automaticMicrophone.map { "Автоматично — \($0.name)" } ?? "Автоматично").tag("")
                     ForEach(microphones) { Text($0.name).tag($0.uid) }
                     if !settings.microphoneUID.isEmpty && !microphones.contains(where: { $0.uid == settings.microphoneUID }) {
-                        Text("Від’єднаний мікрофон").tag(settings.microphoneUID)
+                        Text("\(settings.microphoneName.isEmpty ? "Вибраний мікрофон" : settings.microphoneName) (від’єднаний)")
+                            .tag(settings.microphoneUID)
                     }
+                }
+                Text("Якщо вибрано «Автоматично» або вибраний мікрофон від’єднано: спершу дротовий (USB, вбудований), Bluetooth — в останню чергу, бо з ним навушники перемикаються в режим гарнітури й звучать гірше. Вбудований при закритій кришці пропускається — він записує тишу.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Toggle("Тримати мікрофон відкритим \(Int(Settings.warmMicrophoneSeconds)) с після диктування", isOn: $settings.keepMicrophoneWarm)
+                if settings.keepMicrophoneWarm {
+                    Text("Наступне диктування почнеться без затримки на відкриття мікрофона. Поки він відкритий, світиться помаранчевий індикатор; звук за цей час нікуди не зберігається.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
                 Toggle("Звук на початку й у кінці запису", isOn: $settings.playSounds)
             } header: {
-                Text("Звук")
+                Text("Мікрофон")
             }
 
             Section {
@@ -76,6 +93,18 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Модель whisper")
+            }
+
+            Section {
+                TextField("", text: $settings.replacements, prompt: Text("пі ейч пі шторм → PhpStorm"), axis: .vertical)
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(3...8)
+                    .labelsHidden()
+                Text("Для слів, які whisper пише не так навіть із підказкою. По одному правилу на рядок: «що → на що» (можна «->»). Регістр не важить, замінюється лише ціле слово чи фраза. Порожня права частина — прибрати фразу. Діє правил: \(Replacements(settings.replacements).rules.count).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Заміни після розпізнавання")
             }
 
             Section {
@@ -110,14 +139,27 @@ struct SettingsView: View {
             Section {
                 Toggle("Запускати під час входу в систему", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-                Text("Holos працює повністю офлайн: аудіо обробляється локально й нікуди не надсилається.")
+                Toggle("Перезапускати після збою", isOn: $settings.restartAfterCrash)
+                    .onChange(of: settings.restartAfterCrash) { _, enabled in Watchdog.sync(enabled: enabled) }
+                if settings.restartAfterCrash && !Watchdog.isInstalledCopy {
+                    Text("Працює лише для копії в /Applications (scripts/build.sh --install).")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+                Text("Якщо Holos аварійно завершиться, він запуститься знову за кілька секунд. Звичайний вихід через меню перезапуску не викликає.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text("Holos працює повністю офлайн: аудіо обробляється в пам’яті й нікуди не надсилається та не зберігається. Версія \(AppDelegate.version).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .frame(width: Self.size.width, height: Self.size.height)
-        .onAppear { microphones = AudioDevices.inputs() }
+        .onAppear {
+            microphones = AudioDevices.inputs()
+            automaticMicrophone = AudioDevices.resolve(preferredUID: "")
+        }
     }
 
     /// Збирається з тих самих констант, які використовує Transcriber
@@ -141,6 +183,7 @@ struct SettingsView: View {
         фільтр          відкидає результат, якщо це лише:
         \(filtered)
                         або згадка Amara.org
+        після моделі    заміни: \(Replacements(settings.replacements).rules.count) правил
         """
     }
 
@@ -189,7 +232,7 @@ struct SettingsView: View {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("Holos: автозапуск: \(error.localizedDescription)")
+            Log.app.error("Автозапуск: \(error.localizedDescription, privacy: .public)")
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }
