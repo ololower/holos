@@ -68,6 +68,30 @@ private struct TextArea: View {
     }
 }
 
+/// Індикатор рівня мікрофона, як у Системних параметрах → Звук
+private struct LevelMeter: View {
+    /// 0…1, де 1 — 0 дБ
+    let level: Double
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.1))
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(0, geometry.size.width * level))
+            }
+        }
+        .frame(height: 6)
+        .animation(.linear(duration: 0.08), value: level)
+    }
+
+    /// Мовлення зазвичай −30…−15 дБ — зелена зона; ближче до 0 — ризик перевантаження
+    private var color: Color {
+        level > 0.9 ? .red : level > 0.8 ? .yellow : .green
+    }
+}
+
 // MARK: - Загальні
 
 struct GeneralPane: View {
@@ -176,6 +200,7 @@ struct MicrophonePane: View {
     @State private var automatic: AudioInputDevice?
     @State private var current: AudioInputDevice?
     @State private var lidClosed = false
+    @StateObject private var tester = MicrophoneTester()
 
     var body: some View {
         Form {
@@ -191,6 +216,41 @@ struct MicrophonePane: View {
                 }
             } footer: {
                 Footnote("Вибраний мікрофон береться завжди, коли під’єднаний, — навіть Bluetooth. «Автоматично» і коли вибраний від’єднано: спершу дротовий, Bluetooth — в останню чергу, бо з ним навушники перемикаються в режим гарнітури й звучать гірше.")
+            }
+
+            Section {
+                LabeledContent("Підсилення") {
+                    HStack(spacing: 10) {
+                        // Без step: інакше macOS малює 36 поділок; до цілих дБ округлює прив'язка
+                        Slider(value: gain, in: Settings.gainRange)
+                            .frame(width: 190)
+                        Text(Self.format(decibels: gain.wrappedValue))
+                            .monospacedDigit()
+                            .frame(width: Self.trailingWidth, alignment: .trailing)
+                    }
+                    .disabled(current == nil)
+                }
+                LabeledContent("Рівень") {
+                    HStack(spacing: 10) {
+                        LevelMeter(level: tester.level)
+                            .frame(width: 190)
+                        Button(tester.isRunning ? "Зупинити" : "Перевірити", action: toggleTest)
+                            .fixedSize()
+                            .frame(width: Self.trailingWidth, alignment: .trailing)
+                    }
+                    .disabled(current == nil)
+                }
+                if tester.isRunning {
+                    Label("Говоріть, як під час диктування…", systemImage: "waveform")
+                        .foregroundStyle(.secondary)
+                } else if let verdict = tester.verdict {
+                    Label(verdict.text, systemImage: verdict.isProblem ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(verdict.isProblem ? .orange : .green)
+                }
+            } header: {
+                Text(current.map { "Гучність «\($0.name)» у Holos" } ?? "Гучність у Holos")
+            } footer: {
+                Footnote(gainFootnote)
             }
 
             Section {
@@ -210,9 +270,52 @@ struct MicrophonePane: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 460)
+        .frame(width: paneWidth, height: 640)
         .onAppear(perform: refresh)
-        .onChange(of: settings.microphoneUID) { _, _ in refresh() }
+        .onDisappear { tester.stop() }
+        .onChange(of: settings.microphoneUID) { _, _ in
+            tester.stop()
+            refresh()
+        }
+    }
+
+    /// Підсилення для мікрофона, який зараз буде використано
+    private var gain: Binding<Double> {
+        Binding(
+            get: { current.map { settings.gain(for: $0.uid) } ?? 0 },
+            set: { raw in
+                guard let uid = current?.uid else { return }
+                let value = raw.rounded()
+                guard value != settings.gain(for: uid) else { return }
+                settings.microphoneGains[uid] = value == 0 ? nil : value
+                tester.setGain(decibels: value)
+            }
+        )
+    }
+
+    private var gainFootnote: String {
+        var text = "Діє лише в Holos і лише для цього мікрофона: звук підсилюється чи приглушується вже після запису, тож системна гучність"
+        if let device = current, let volume = AudioDevices.inputVolume(of: device) {
+            text += " (зараз \(Int((volume * 100).rounded())) %)"
+        }
+        text += " та інші програми не змінюються. Натисніть «Перевірити» й кілька секунд говоріть, як під час диктування."
+        return text
+    }
+
+    private func toggleTest() {
+        if tester.isRunning {
+            tester.stop()
+        } else {
+            tester.start(deviceUID: settings.microphoneUID, gains: settings.microphoneGains)
+        }
+    }
+
+    /// Однакова ширина праворуч від повзунка й індикатора, щоб вони були одної довжини
+    private static let trailingWidth: CGFloat = 96
+
+    static func format(decibels: Double) -> String {
+        let value = Int(decibels.rounded())
+        return value > 0 ? "+\(value) дБ" : value < 0 ? "−\(-value) дБ" : "0 дБ"
     }
 
     private func refresh() {
@@ -223,12 +326,18 @@ struct MicrophonePane: View {
     }
 
     private func description(of device: AudioInputDevice) -> String {
-        if device.isBuiltIn && lidClosed { return "Вбудований — кришка закрита, автоматично не береться" }
-        switch device.kind {
-        case .wired: return device.isBuiltIn ? "Вбудований" : "Дротовий"
-        case .wireless: return "Бездротовий (Bluetooth, iPhone) — автоматично в останню чергу"
-        case .virtual: return "Віртуальний — лише якщо вибрати явно"
+        let kind: String
+        if device.isBuiltIn && lidClosed {
+            kind = "Вбудований — кришка закрита, автоматично не береться"
+        } else {
+            switch device.kind {
+            case .wired: kind = device.isBuiltIn ? "Вбудований" : "Дротовий"
+            case .wireless: kind = "Бездротовий (Bluetooth, iPhone) — автоматично в останню чергу"
+            case .virtual: kind = "Віртуальний — лише якщо вибрати явно"
+            }
         }
+        let gain = settings.gain(for: device.uid)
+        return gain == 0 ? kind : "\(kind) · у Holos \(Self.format(decibels: gain))"
     }
 }
 

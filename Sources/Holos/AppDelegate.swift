@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notice = nil
         handsFree = false
         // Мікрофон відкривається у фоні: клавіша й анімація не чекають на нього
-        recorder.start(deviceUID: settings.microphoneUID)
+        recorder.start(deviceUID: settings.microphoneUID, gains: settings.microphoneGains)
         recordingStartedAt = Date()
         phase = .recording
         overlay.show(.recording)

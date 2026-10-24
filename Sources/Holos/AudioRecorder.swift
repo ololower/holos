@@ -45,6 +45,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var samples: [Float] = []
     private var isCollecting = false
     private var receivedAudio = false
+    /// Підсилення Holos для поточного мікрофона, у разах (див. Settings.microphoneGains)
+    private var gain: Float = 1
 
     /// Лише в bufferQueue: на випадок, якщо сесія віддасть не той формат, який просили
     private var converter: AVAudioConverter?
@@ -84,7 +86,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
 
     /// Відкриває мікрофон із цим UID; порожній чи від'єднаний — за чергою з AudioDevices.resolve.
     /// Повертається одразу: сесія запускається у фоні, помилки приходять в onFailure.
-    func start(deviceUID: String) {
+    /// `gains` — підсилення в дБ за UID мікрофона; береться для того, який справді відкриється
+    func start(deviceUID: String, gains: [String: Double] = [:]) {
         generation += 1
         isRecording = true
         let generation = generation
@@ -102,6 +105,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                 if !deviceUID.isEmpty && device.uid != deviceUID {
                     Log.audio.notice("Вибраний мікрофон від'єднаний, беру «\(device.name, privacy: .public)»")
                 }
+                setGain(decibels: gains[device.uid] ?? 0)
                 // Мікрофон уже відкритий з минулого диктування — просто збираємо звук
                 if !(session.isRunning && attachedUID == device.uid) {
                     if session.isRunning { session.stopRunning() }
@@ -179,10 +183,21 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         attachedUID = nil
     }
 
+    /// Можна міняти й під час запису — так повзунок у налаштуваннях діє одразу
+    func setGain(decibels: Double) {
+        let linear = Float(pow(10, decibels / 20))
+        lock.withLock { gain = linear }
+    }
+
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         // Між диктуваннями (мікрофон тримаємо відкритим) звук навіть не обробляємо
         guard lock.withLock({ isCollecting }) else { return }
-        let chunk = convert(sampleBuffer)
+        var chunk = convert(sampleBuffer)
+        let gain = lock.withLock { self.gain }
+        if gain != 1 {
+            // Як і справжній перевантажений мікрофон, не виходимо за ±1
+            for i in chunk.indices { chunk[i] = max(-1, min(1, chunk[i] * gain)) }
+        }
         let collecting = lock.withLock { () -> Bool in
             guard isCollecting else { return false }
             samples.append(contentsOf: chunk)

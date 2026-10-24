@@ -87,7 +87,7 @@ enum SelfTest {
         let device = AudioDevices.resolve(preferredUID: deviceUID)
         let mode = deviceUID.isEmpty ? "автоматично" : (device?.uid == deviceUID ? "вибраний" : "вибраний від'єднаний, замість нього")
         print("Мікрофон (\(mode)): \(device?.name ?? "немає")")
-        recorder.start(deviceUID: deviceUID)
+        recorder.start(deviceUID: deviceUID, gains: Settings.shared.microphoneGains)
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 
         var samples: [Float]?

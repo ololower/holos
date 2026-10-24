@@ -88,6 +88,18 @@ final class Settings: ObservableObject {
         didSet { defaults.set(microphoneName, forKey: "microphoneName") }
     }
 
+    /// Підсилення в Holos, дБ, окремо для кожного мікрофона (UID → дБ). Застосовується до вже записаного
+    /// звуку, тож системна гучність мікрофона й інші програми не змінюються.
+    @Published var microphoneGains: [String: Double] {
+        didSet { defaults.set(microphoneGains, forKey: "microphoneGains") }
+    }
+
+    static let gainRange: ClosedRange<Double> = -12...24
+
+    func gain(for uid: String) -> Double {
+        microphoneGains[uid] ?? 0
+    }
+
     /// Подвійне натискання клавіші — запис без утримання
     @Published var handsFree: Bool {
         didSet { defaults.set(handsFree, forKey: "handsFree") }
@@ -149,6 +161,7 @@ final class Settings: ObservableObject {
         language = defaults.string(forKey: "language") ?? DictationLanguage.defaultCode
         microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         microphoneName = defaults.string(forKey: "microphoneName") ?? ""
+        microphoneGains = defaults.dictionary(forKey: "microphoneGains") as? [String: Double] ?? [:]
         modelPath = defaults.string(forKey: "modelPath") ?? Settings.defaultModelPath
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true

@@ -74,6 +74,20 @@ enum AudioDevices {
         return nil
     }
 
+    /// Системна гучність входу мікрофона, 0…1; nil — у пристрою її немає (наприклад, iPhone)
+    static func inputVolume(of device: AudioInputDevice) -> Double? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(device.id, &address) else { return nil }
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(device.id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return Double(value)
+    }
+
     /// Кришка MacBook закрита (працює із зовнішнім монітором)
     static var isLidClosed: Bool {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
