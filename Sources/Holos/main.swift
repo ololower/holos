@@ -25,13 +25,15 @@ if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < Command
 }
 
 // Заміни й пробіли навколо тексту без розпізнавання:
-// Holos --postprocess <текст> [--rules <правила>] [--before <символ>] [--after <символ>]
+// Holos --postprocess <текст> [--rules "що > на що"…] [--before <символ>] [--after <символ>]
+// Без --rules — заміни з налаштувань.
 if let i = CommandLine.arguments.firstIndex(of: "--postprocess"), i + 1 < CommandLine.arguments.count {
     func option(_ name: String) -> String? {
         guard let j = CommandLine.arguments.firstIndex(of: name), j + 1 < CommandLine.arguments.count else { return nil }
         return CommandLine.arguments[j + 1]
     }
-    exit(SelfTest.postprocess(CommandLine.arguments[i + 1], rules: option("--rules") ?? Settings.shared.replacements,
+    let replacements = option("--rules").map { Replacements(Replacements.parse($0)) } ?? Settings.shared.replacements
+    exit(SelfTest.postprocess(CommandLine.arguments[i + 1], replacements: replacements,
                               before: option("--before"), after: option("--after")))
 }
 

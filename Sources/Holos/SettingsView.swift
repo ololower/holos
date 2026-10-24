@@ -44,24 +44,22 @@ private struct Footnote: View {
     }
 }
 
-/// Багаторядкове поле з підказкою, коли порожнє. TextEditor, а не TextField: у полі Return
-/// завершує редагування, а заміни пишуться по одній на рядок.
+/// Багаторядкове поле з підказкою, коли порожнє. TextEditor, а не TextField з axis: .vertical —
+/// той у згрупованій формі малює текст жирним.
 private struct TextArea: View {
     @Binding var text: String
     let placeholder: String
     let height: CGFloat
-    var monospaced = false
 
     var body: some View {
-        let font = Font.system(.body, design: monospaced ? .monospaced : .default)
         TextEditor(text: $text)
-            .font(font)
+            .font(.body)
             .scrollContentBackground(.hidden)
             .frame(height: height)
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(placeholder)
-                        .font(font)
+                        .font(.body)
                         .foregroundStyle(.tertiary)
                         .padding(.leading, 5)
                         .allowsHitTesting(false)
@@ -262,16 +260,7 @@ struct RecognitionPane: View {
             } header: {
                 Text("Підказка")
             } footer: {
-                Footnote("Слова в потрібному написанні, наприклад «Олексій, Kubernetes, PhpStorm, пулреквест». Модель сприймає підказку як попередню репліку й копіює її написання та стиль. Пишіть тією мовою, якою диктуєте.")
-            }
-
-            Section {
-                TextArea(text: $settings.replacements, placeholder: "пі ейч пі шторм → PhpStorm\nкубер → Kubernetes",
-                         height: 96, monospaced: true)
-            } header: {
-                Text("Заміни після розпізнавання")
-            } footer: {
-                Footnote("Для слів, які модель пише не так навіть із підказкою. По одному правилу на рядок: «що → на що» (можна «->»). Регістр не важить, замінюється лише ціле слово чи фраза; порожня права частина прибирає фразу. Діє правил: \(Replacements(settings.replacements).rules.count).")
+                Footnote("Слова в потрібному написанні, наприклад «Олексій, Kubernetes, PhpStorm, пулреквест.» Модель сприймає підказку як попередню репліку й копіює з неї написання, регістр і розділові знаки: підказка з малої літери дає речення з малої. Тож пишіть із великої й ставте крапку в кінці, тією мовою, якою диктуєте.")
             }
 
             Section {
@@ -319,7 +308,7 @@ struct RecognitionPane: View {
         фільтр          відкидає результат, якщо це лише:
         \(filtered)
                         або згадка Amara.org
-        після моделі    заміни: \(Replacements(settings.replacements).rules.count) правил
+        після моделі    заміни: \(settings.replacements.rules.count) правил (вкладка «Заміни»)
         """
     }
 
@@ -348,6 +337,94 @@ struct RecognitionPane: View {
         if panel.runModal() == .OK, let url = panel.url {
             settings.modelPath = url.path
         }
+    }
+}
+
+// MARK: - Заміни
+
+/// Таблиця замін, як «Заміна тексту» в налаштуваннях клавіатури macOS
+struct ReplacementsPane: View {
+    @ObservedObject private var settings = Settings.shared
+    @State private var selection = Set<ReplacementRule.ID>()
+    @State private var sample = ""
+
+    var body: some View {
+        Form {
+            Section {
+                Table(settings.replacementRules, selection: $selection) {
+                    TableColumn("Модель пише") { rule in
+                        TextField("", text: binding(rule.id, \.from), prompt: Text("пі ейч пі шторм"))
+                    }
+                    TableColumn("Замінити на") { rule in
+                        TextField("", text: binding(rule.id, \.to), prompt: Text("прибрати"))
+                    }
+                }
+                .frame(height: 210)
+                .overlay {
+                    if settings.replacementRules.isEmpty {
+                        Text("Замін поки немає — натисніть +")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack(spacing: 12) {
+                    Button(action: add) { Image(systemName: "plus") }
+                        .help("Додати заміну")
+                    Button(action: removeSelected) { Image(systemName: "minus") }
+                        .help("Видалити вибрані")
+                        .disabled(selection.isEmpty)
+                    Spacer()
+                    Text("Діє правил: \(settings.replacements.rules.count)")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            } header: {
+                Text("Заміни після розпізнавання")
+            } footer: {
+                Footnote("Як це працює: модель розпізнає мовлення як уміє, а Holos потім шукає в готовому тексті фрази з лівої колонки й ставить замість них праву. Сама модель про заміни не знає — на відміну від підказки. Регістр не важить, замінюється лише ціле слово чи фраза: «кубер» не зачепить «кубернетис». Порожня права колонка прибирає фразу разом із зайвими комами.")
+            }
+
+            Section {
+                TextField("Фраза", text: $sample, prompt: Text("відкрий пі ейч пі шторм"))
+                LabeledContent("Вставиться") {
+                    Text(sample.isEmpty ? "—" : preview)
+                        .foregroundStyle(sample.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("Перевірка")
+            } footer: {
+                Footnote("Напишіть фразу так, як її розпізнала модель, — побачите, що з неї зроблять заміни. Розпізнавання тут не запускається.")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: paneWidth, height: 600)
+    }
+
+    private var preview: String {
+        let result = settings.replacements.apply(to: sample)
+        return result.isEmpty ? "(нічого — усе прибрано)" : result
+    }
+
+    private func add() {
+        let rule = ReplacementRule(from: "", to: "")
+        settings.replacementRules.append(rule)
+        selection = [rule.id]
+    }
+
+    private func removeSelected() {
+        settings.replacementRules.removeAll { selection.contains($0.id) }
+        selection = []
+    }
+
+    /// Прив'язка до поля правила за id: Table віддає рядки за значенням
+    private func binding(_ id: ReplacementRule.ID, _ field: WritableKeyPath<ReplacementRule, String>) -> Binding<String> {
+        Binding(
+            get: { settings.replacementRules.first { $0.id == id }?[keyPath: field] ?? "" },
+            set: { value in
+                guard let index = settings.replacementRules.firstIndex(where: { $0.id == id }) else { return }
+                settings.replacementRules[index][keyPath: field] = value
+            }
+        )
     }
 }
 

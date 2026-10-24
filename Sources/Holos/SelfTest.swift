@@ -55,7 +55,7 @@ enum SelfTest {
         let detected = language == DictationLanguage.auto ? ", визначено: \(transcriber.lastLanguage ?? "?")" : ""
         print(String(format: "Розпізнано за %.2f с (мова: %@%@):", Date().timeIntervalSince(start), language, detected))
         print(text)
-        let replaced = Replacements(Settings.shared.replacements).apply(to: text)
+        let replaced = Settings.shared.replacements.apply(to: text)
         if replaced != text {
             print("Після замін:")
             print(replaced)
@@ -66,8 +66,7 @@ enum SelfTest {
     /// Те, що відбувається з текстом після whisper: заміни й пробіли за символами навколо курсора.
     /// `before`/`after` — символ перед і після курсора; «край» — початок чи кінець поля; без них — поле,
     /// яке не віддає цього через Accessibility.
-    static func postprocess(_ text: String, rules: String, before: String?, after: String?) -> Int32 {
-        let replacements = Replacements(rules)
+    static func postprocess(_ text: String, replacements: Replacements, before: String?, after: String?) -> Int32 {
         print("Правил: \(replacements.rules.count)")
         let replaced = replacements.apply(to: text)
         print("Після замін: «\(replaced)»")

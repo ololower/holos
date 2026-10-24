@@ -276,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let prompt = settings.prompt
         let language = settings.language
-        let replacements = Replacements(settings.replacements)
+        let replacements = settings.replacements
         let options = settings.transcriberOptions
         let seconds = Double(samples.count) / AudioRecorder.sampleRate
         let started = Date()

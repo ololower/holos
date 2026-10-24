@@ -5,7 +5,7 @@ import SwiftUI
 /// вікно підлаштовує висоту під вкладку
 final class SettingsWindowController: NSWindowController {
     enum Tab: Int, CaseIterable {
-        case general, microphone, recognition, experimental
+        case general, microphone, recognition, replacements, experimental
     }
 
     private let tabs = SettingsTabViewController()
@@ -50,6 +50,7 @@ private final class SettingsTabViewController: NSTabViewController {
         addPane("Загальні", symbol: "gearshape", GeneralPane())
         addPane("Мікрофон", symbol: "mic", MicrophonePane())
         addPane("Розпізнавання", symbol: "waveform", RecognitionPane())
+        addPane("Заміни", symbol: "arrow.triangle.swap", ReplacementsPane())
         addPane("Експериментальне", symbol: "flask", ExperimentalPane())
     }
 

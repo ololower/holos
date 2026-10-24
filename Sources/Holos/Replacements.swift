@@ -1,30 +1,41 @@
 import Foundation
 
-/// Заміни в розпізнаному тексті — для слів, які whisper пише не так навіть із підказкою.
-/// По одному правилу на рядок: «пі ейч пі шторм → PhpStorm» (можна й «->»).
-/// Регістр у лівій частині не важить; замінюється лише ціле слово чи фраза, не шматок слова.
-/// Права частина вставляється як є; порожня — видаляє фразу.
-struct Replacements {
-    struct Rule {
-        let from: String
-        let to: String
-    }
+/// Одне правило заміни: як модель пише фразу → як її треба писати. Порожнє `to` прибирає фразу.
+struct ReplacementRule: Codable, Hashable, Identifiable {
+    var id = UUID()
+    var from: String
+    var to: String
+}
 
-    let rules: [Rule]
+/// Заміни в уже розпізнаному тексті — для слів, які whisper пише не так навіть із підказкою.
+/// Сама модель про них не знає: Holos шукає фрази в її результаті й замінює.
+/// Регістр у `from` не важить; замінюється лише ціле слово чи фраза, не шматок слова.
+/// `to` вставляється як є; порожнє — прибирає фразу разом із зайвими комами.
+struct Replacements {
+    /// Лише правила з непорожнім `from`
+    let rules: [ReplacementRule]
     private let compiled: [(NSRegularExpression, String)]
 
-    init(_ text: String) {
-        rules = text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let arrow = line.range(of: "→") ?? line.range(of: "->") else { return nil }
-            let from = line[..<arrow.lowerBound].trimmingCharacters(in: .whitespaces)
-            let to = line[arrow.upperBound...].trimmingCharacters(in: .whitespaces)
-            return from.isEmpty ? nil : Rule(from: from, to: to)
+    init(_ rules: [ReplacementRule]) {
+        self.rules = rules.compactMap { rule in
+            let from = rule.from.trimmingCharacters(in: .whitespaces)
+            return from.isEmpty ? nil : ReplacementRule(id: rule.id, from: from, to: rule.to.trimmingCharacters(in: .whitespaces))
         }
-        compiled = rules.compactMap { rule in
+        compiled = self.rules.compactMap { rule in
             // Межі слова — будь-який символ, що не літера й не цифра (\b у ICU не завжди дружить з апострофом)
             let pattern = "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: rule.from) + "(?![\\p{L}\\p{N}])"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
             return (regex, NSRegularExpression.escapedTemplate(for: rule.to))
+        }
+    }
+
+    /// Правила з тексту, по одному на рядок: «пі ейч пі шторм > PhpStorm». Для перевірки з командного
+    /// рядка й перенесення старих налаштувань, де замість «>» була стрілка «→» чи «->».
+    static func parse(_ text: String) -> [ReplacementRule] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            // Стрілки — першими: у «->» теж є «>»
+            guard let separator = line.range(of: "→") ?? line.range(of: "->") ?? line.range(of: ">") else { return nil }
+            return ReplacementRule(from: String(line[..<separator.lowerBound]), to: String(line[separator.upperBound...]))
         }
     }
 

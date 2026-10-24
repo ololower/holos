@@ -119,10 +119,12 @@ final class Settings: ObservableObject {
         Transcriber.Options(fastLongPhrases: fastLongPhrases, noFallback: noFallback)
     }
 
-    /// Заміни після розпізнавання, по одній на рядок: «що → на що» (див. Replacements)
-    @Published var replacements: String {
-        didSet { defaults.set(replacements, forKey: "replacements") }
+    /// Заміни після розпізнавання (див. Replacements)
+    @Published var replacementRules: [ReplacementRule] {
+        didSet { defaults.set(try? JSONEncoder().encode(replacementRules), forKey: "replacementRules") }
     }
+
+    var replacements: Replacements { Replacements(replacementRules) }
 
     /// Запускати Holos знову, якщо він аварійно завершився (див. Watchdog)
     @Published var restartAfterCrash: Bool {
@@ -155,7 +157,16 @@ final class Settings: ObservableObject {
         warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
         fastLongPhrases = defaults.bool(forKey: "experimentalFastLongPhrases")
         noFallback = defaults.bool(forKey: "experimentalNoFallback")
-        replacements = defaults.string(forKey: "replacements") ?? ""
+        if let data = defaults.data(forKey: "replacementRules"),
+           let rules = try? JSONDecoder().decode([ReplacementRule].self, from: data) {
+            replacementRules = rules
+        } else {
+            // Раніше заміни були текстом «що → на що» по рядку
+            let migrated = Replacements.parse(defaults.string(forKey: "replacements") ?? "")
+            replacementRules = migrated
+            defaults.set(try? JSONEncoder().encode(migrated), forKey: "replacementRules")
+            defaults.removeObject(forKey: "replacements")
+        }
         restartAfterCrash = defaults.object(forKey: "restartAfterCrash") as? Bool ?? true
         // Для мікрофона, вибраного до появи microphoneName
         if microphoneName.isEmpty, !microphoneUID.isEmpty,
