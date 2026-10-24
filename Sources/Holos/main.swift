@@ -13,6 +13,14 @@ if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < Command
                       language: option("--language") ?? DictationLanguage.defaultCode))
 }
 
+// Запис із мікрофона без інтерфейсу: Holos --record <секунди> [--microphone <UID>]
+if let i = CommandLine.arguments.firstIndex(of: "--record"), i + 1 < CommandLine.arguments.count,
+   let seconds = TimeInterval(CommandLine.arguments[i + 1]) {
+    let j = CommandLine.arguments.firstIndex(of: "--microphone")
+    let uid = j.flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+    exit(SelfTest.record(seconds: seconds, deviceUID: uid ?? Settings.shared.microphoneUID))
+}
+
 // Список мов, які підтримує whisper: Holos --languages
 if CommandLine.arguments.contains("--languages") {
     DictationLanguage.all.forEach { print("\($0.code)\t\($0.name)") }

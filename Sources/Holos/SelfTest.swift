@@ -52,6 +52,30 @@ enum SelfTest {
         return text.isEmpty ? 2 : 0
     }
 
+    /// Запис із мікрофона без інтерфейсу — тим самим AudioRecorder, що й під час диктування.
+    /// Мікрофон береться з налаштувань Holos, якщо не вказано інший.
+    static func record(seconds: TimeInterval, deviceUID: String) -> Int32 {
+        let recorder = AudioRecorder()
+        var failure: String?
+        recorder.onFailure = { failure = $0 }
+        print("Мікрофон: \(deviceUID.isEmpty ? "системний за замовчуванням" : deviceUID)")
+        recorder.start(deviceUID: deviceUID)
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+
+        var samples: [Float]?
+        recorder.stop { samples = $0 }
+        while samples == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+
+        if let failure {
+            print("Помилка: \(failure)")
+            return 1
+        }
+        let recorded = samples ?? []
+        print(String(format: "Записано: %.2f с з %.1f с, RMS %.4f",
+                     Double(recorded.count) / AudioRecorder.sampleRate, seconds, Transcriber.rms(recorded)))
+        return recorded.isEmpty ? 2 : 0
+    }
+
     /// Аркуш із ключовими кадрами пігулки: (підпис, фази, коли змінилася остання, гучність, момент кадру)
     @MainActor
     static func renderOverlay(to path: String) -> Int32 {
@@ -63,6 +87,7 @@ enum SelfTest {
             ("Розпізнавання", [.recording, .transcribing], -10, nil, 0.3),
             ("Розпізнавання +0,25 с", [.recording, .transcribing], -10, nil, 0.55),
             ("Готово", [.transcribing, .done], -10, nil, 0),
+            ("Помилка запису", [.recording, .failed], -10, nil, 0),
         ]
         let rows = frames.map { label, phases, changedAt, rms, time -> (String, OverlayModel, TimeInterval) in
             let model = OverlayModel()

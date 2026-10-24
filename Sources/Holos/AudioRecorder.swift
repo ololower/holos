@@ -1,71 +1,186 @@
 import AVFoundation
-import AudioToolbox
+import CoreMedia
 
 enum RecorderError: LocalizedError {
     case noInput
-    case converter
+    case cannotOpen(String)
+    case noAudio
 
     var errorDescription: String? {
         switch self {
         case .noInput: return "Мікрофон недоступний"
-        case .converter: return "Не вдалося налаштувати перетворення аудіо"
+        case .cannotOpen(let name): return "Не вдалося відкрити мікрофон «\(name)»"
+        case .noAudio: return "Мікрофон не передає звук"
         }
     }
 }
 
 /// Записує мікрофон у пам'ять як 16 кГц моно Float32 — формат, який очікує whisper.
 /// На диск нічого не пишеться.
-final class AudioRecorder {
+///
+/// AVCaptureSession, а не AVAudioEngine: сесія відкриває одразу вибраний мікрофон. AVAudioEngine спершу
+/// підключається до системного мікрофона й лише потім перемикається на вибраний. Коли системним були
+/// Bluetooth-навушники, це вмикало в них режим гарнітури, а розбіжність частот закінчувалася винятком
+/// в installTap, якого Swift не ловить: запис мовчки не починався, а рушій лишався в пам'яті.
+final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     static let sampleRate = 16_000.0
     static let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
-
-    private var engine: AVAudioEngine?
-    private let lock = NSLock()
-    private var samples: [Float] = []
+    /// Якщо за цей час після запуску не прийшло жодної порції звуку, мікрофон не працює
+    static let noAudioTimeout = 1.5
 
     /// Гучність кожної порції аудіо (RMS); викликається з аудіопотоку
     var onLevel: ((Float) -> Void)?
+    /// Запис зірвався; викликається з головного потоку й лише поки запис триває
+    var onFailure: ((String) -> Void)?
 
-    var isRecording: Bool { engine != nil }
+    private let session = AVCaptureSession()
+    private let output = AVCaptureAudioDataOutput()
+    /// startRunning і stopRunning блокують, тому вся робота із сесією — лише в цій черзі
+    private let sessionQueue = DispatchQueue(label: "holos.capture")
+    private let bufferQueue = DispatchQueue(label: "holos.capture.buffers", qos: .userInitiated)
+    private var observers: [NSObjectProtocol] = []
 
-    func start(deviceUID: String) throws {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
+    // Спільне для черг сесії й аудіо — під lock
+    private let lock = NSLock()
+    private var samples: [Float] = []
+    private var isCollecting = false
+    private var receivedAudio = false
 
-        if !deviceUID.isEmpty, let device = AudioDevices.device(uid: deviceUID), let unit = input.audioUnit {
-            var id = device.id
-            let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                                              &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-            if status != noErr { NSLog("Holos: не вдалося вибрати мікрофон \(deviceUID): \(status)") }
-        }
+    /// Лише в bufferQueue: на випадок, якщо сесія віддасть не той формат, який просили
+    private var converter: AVAudioConverter?
 
-        let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { throw RecorderError.noInput }
-        guard let converter = AVAudioConverter(from: inputFormat, to: Self.targetFormat) else { throw RecorderError.converter }
-        converter.downmix = true
+    // Лише в головному потоці
+    private var generation = 0
+    private var isRecording = false
 
-        lock.withLock { samples.removeAll(keepingCapacity: true) }
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            let converted = AudioRecorder.convert(buffer, with: converter)
-            self?.lock.withLock { self?.samples.append(contentsOf: converted) }
-            self?.onLevel?(Transcriber.rms(converted))
-        }
-        engine.prepare()
-        try engine.start()
-        self.engine = engine
+    override init() {
+        super.init()
+        // Сесія сама перетворює звук у формат whisper
+        output.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: Self.sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+        output.setSampleBufferDelegate(self, queue: bufferQueue)
+        if session.canAddOutput(output) { session.addOutput(output) }
+
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .AVCaptureSessionRuntimeError, object: session, queue: .main
+        ) { [weak self] note in
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? Error
+            self?.fail(error?.localizedDescription ?? "Мікрофон перестав працювати")
+        })
     }
 
-    /// Зупиняє запис і повертає записані семпли
-    func stop() -> [Float] {
-        guard let engine else { return [] }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        self.engine = nil
-        return lock.withLock {
-            let result = samples
-            samples = []
-            return result
+    /// Відкриває мікрофон із цим UID; порожній або від'єднаний — системний за замовчуванням.
+    /// Повертається одразу: сесія запускається у фоні, помилки приходять в onFailure.
+    func start(deviceUID: String) {
+        generation += 1
+        isRecording = true
+        let generation = generation
+        sessionQueue.async { [self] in
+            // Тут, а не в головному потоці: попередній stop() у цій черзі має встигнути забрати свої семпли
+            lock.withLock {
+                samples.removeAll(keepingCapacity: true)
+                isCollecting = true
+                receivedAudio = false
+            }
+            do {
+                try attachDevice(uid: deviceUID)
+            } catch {
+                DispatchQueue.main.async { self.fail(error.localizedDescription, generation: generation) }
+                return
+            }
+            session.startRunning()
+            sessionQueue.asyncAfter(deadline: .now() + Self.noAudioTimeout) { [self] in
+                guard lock.withLock({ isCollecting && !receivedAudio }) else { return }
+                DispatchQueue.main.async { self.fail(RecorderError.noAudio.localizedDescription, generation: generation) }
+            }
         }
+    }
+
+    /// Зупиняє запис і віддає записані семпли в головний потік
+    func stop(_ completion: @escaping ([Float]) -> Void) {
+        isRecording = false
+        sessionQueue.async { [self] in
+            session.stopRunning()
+            bufferQueue.sync {} // порції, які вже в дорозі
+            let result = lock.withLock {
+                isCollecting = false
+                defer { samples = [] }
+                return samples
+            }
+            detachDevice()
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// Лише в головному потоці. Без `generation` — про поточний запис.
+    private func fail(_ message: String, generation: Int? = nil) {
+        guard isRecording, generation == nil || generation == self.generation else { return }
+        onFailure?(message)
+    }
+
+    /// Лише в sessionQueue
+    private func attachDevice(uid: String) throws {
+        let device = (uid.isEmpty ? nil : AVCaptureDevice(uniqueID: uid)) ?? AVCaptureDevice.default(for: .audio)
+        guard let device else { throw RecorderError.noInput }
+        let input: AVCaptureDeviceInput
+        do {
+            input = try AVCaptureDeviceInput(device: device)
+        } catch {
+            throw RecorderError.cannotOpen(device.localizedName)
+        }
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        session.inputs.forEach(session.removeInput)
+        guard session.canAddInput(input) else { throw RecorderError.cannotOpen(device.localizedName) }
+        session.addInput(input)
+    }
+
+    /// Лише в sessionQueue. Між записами мікрофон не тримаємо.
+    private func detachDevice() {
+        session.beginConfiguration()
+        session.inputs.forEach(session.removeInput)
+        session.commitConfiguration()
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let chunk = convert(sampleBuffer)
+        let collecting = lock.withLock { () -> Bool in
+            guard isCollecting else { return false }
+            samples.append(contentsOf: chunk)
+            receivedAudio = true
+            return true
+        }
+        if collecting { onLevel?(Transcriber.rms(chunk)) }
+    }
+
+    /// Порція із сесії як 16 кГц моно. Зазвичай вона вже в цьому форматі (див. audioSettings),
+    /// інакше — через AVAudioConverter.
+    private func convert(_ sampleBuffer: CMSampleBuffer) -> [Float] {
+        guard let description = sampleBuffer.formatDescription else { return [] }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        let frames = AVAudioFrameCount(sampleBuffer.numSamples)
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return [] }
+        buffer.frameLength = frames
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(frames),
+                                                                   into: buffer.mutableAudioBufferList)
+        guard status == noErr else { return [] }
+
+        if format.commonFormat == .pcmFormatFloat32, format.sampleRate == Self.sampleRate, format.channelCount == 1,
+           let channel = buffer.floatChannelData {
+            return Array(UnsafeBufferPointer(start: channel[0], count: Int(frames)))
+        }
+        if converter?.inputFormat != format {
+            converter = AVAudioConverter(from: format, to: Self.targetFormat)
+            converter?.downmix = true
+        }
+        guard let converter else { return [] }
+        return Self.convert(buffer, with: converter)
     }
 
     /// Перетворює буфер довільного формату в 16 кГц моно. Конвертер зберігає стан між викликами,

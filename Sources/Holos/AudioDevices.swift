@@ -28,8 +28,18 @@ enum AudioDevices {
         }
     }
 
-    static func device(uid: String) -> AudioInputDevice? {
-        inputs().first { $0.uid == uid }
+    /// Мікрофон, вибраний у системі за замовчуванням
+    static func defaultInput() -> AudioInputDevice? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr
+        else { return nil }
+        return inputs().first { $0.id == id }
     }
 
     private static func inputChannelCount(_ id: AudioDeviceID) -> Int {

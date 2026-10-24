@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum OverlayPhase: Equatable {
-    case hidden, recording, transcribing, done
+    case hidden, recording, transcribing, done, failed
 }
 
 final class OverlayModel: ObservableObject {
@@ -110,7 +110,7 @@ struct OverlayPill: View {
         let x = Double(i) / Double(Self.barCount - 1)
         let profile = 0.4 + 0.6 * exp(-pow((x - 0.5) / 0.28, 2)) // у центрі вищі
         switch phase {
-        case .hidden, .done:
+        case .hidden, .done, .failed:
             return 0
         case .recording:
             return min(1, pow(level, 0.8) * 1.15) * profile * (0.65 + 0.35 * sin(time * 10 + Double(i) * 1.9))
@@ -128,6 +128,8 @@ struct OverlayPill: View {
             return RGB.palette(Double(i) / Double(Self.barCount) * 0.9 - time * 0.45)
         case .done:
             return RGB(0.34, 0.84, 0.5)
+        case .failed:
+            return RGB(1, 0.36, 0.36)
         }
     }
 
@@ -154,6 +156,13 @@ struct OverlayPill: View {
             check.addLine(to: CGPoint(x: center.x + 4, y: center.y - 2.8))
             context.stroke(check, with: .color(RGB(0.34, 0.84, 0.5).color),
                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        case .failed:
+            var cross = Path()
+            cross.move(to: CGPoint(x: center.x - 3.5, y: center.y - 3.5))
+            cross.addLine(to: CGPoint(x: center.x + 3.5, y: center.y + 3.5))
+            cross.move(to: CGPoint(x: center.x + 3.5, y: center.y - 3.5))
+            cross.addLine(to: CGPoint(x: center.x - 3.5, y: center.y + 3.5))
+            context.stroke(cross, with: .color(RGB(1, 0.36, 0.36).color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
         }
     }
 

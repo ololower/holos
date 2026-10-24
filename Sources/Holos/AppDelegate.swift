@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum Phase { case idle, recording, transcribing }
 
     private let settings = Settings.shared
@@ -16,7 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private let stateMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let copyLastMenuItem = NSMenuItem(title: "Копіювати останній текст", action: #selector(copyLast), keyEquivalent: "")
+    private let historyMenu = NSMenu()
+    private let microphoneMenu = NSMenu()
+    private let languageMenu = NSMenu()
+    private let triggerKeyMenu = NSMenu()
     private var settingsWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var permissionTimer: Timer?
@@ -24,7 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var phase = Phase.idle { didSet { updateStatusItem() } }
     private var recordingStartedAt = Date()
-    private var lastText = ""
+    /// Останні розпізнані тексти, найновіший першим. Лише в пам'яті — до виходу з Holos.
+    private var history: [String] = []
+    private let historyLimit = 5
+    /// Чому зірвався останній запис; показується в меню до наступної спроби
+    private var lastError: String?
 
     private let minimumDuration = 0.3  // коротше — випадкове натискання
     private let maximumDuration = 180.0 // запобіжник, якщо подія відпускання загубилася
@@ -42,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recorder.onLevel = { [weak self] rms in
             DispatchQueue.main.async { self?.overlay.model.push(rms: rms) }
         }
+        recorder.onFailure = { [weak self] message in self?.recordingFailed(message) }
 
         settings.$triggerKey.dropFirst().sink { [weak self] key in
             self?.hotkey.key = key
@@ -125,13 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSSound.beep()
             return
         }
-        do {
-            try recorder.start(deviceUID: settings.microphoneUID)
-        } catch {
-            NSLog("Holos: запис не почався: \(error.localizedDescription)")
-            NSSound.beep()
-            return
-        }
+        lastError = nil
+        // Мікрофон відкривається у фоні: клавіша й анімація не чекають на нього
+        recorder.start(deviceUID: settings.microphoneUID)
         recordingStartedAt = Date()
         phase = .recording
         overlay.show(.recording)
@@ -144,24 +148,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cancelRecording() {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
-        _ = recorder.stop()
+        recorder.stop { _ in }
         phase = .idle
         overlay.hide()
+    }
+
+    /// Мікрофон не відкрився або замовк посеред запису — кажемо про це, а не мовчимо
+    private func recordingFailed(_ message: String) {
+        guard phase == .recording else { return }
+        maxDurationTimer?.invalidate()
+        recorder.stop { _ in }
+        NSLog("Holos: запис не вдався: %@", message)
+        lastError = message
+        phase = .idle
+        overlay.show(.failed)
+        overlay.hide(after: 1.5)
+        NSSound.beep()
     }
 
     private func finishRecording() {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
-        let samples = recorder.stop()
         let duration = Date().timeIntervalSince(recordingStartedAt)
+        // Поки сесія зупиняється й віддає семпли, нового запису не починаємо
+        phase = .transcribing
+        recorder.stop { [weak self] samples in
+            self?.transcribe(samples, duration: duration)
+        }
+    }
 
+    private func transcribe(_ samples: [Float], duration: TimeInterval) {
         guard duration >= minimumDuration, Transcriber.rms(samples) >= silenceRMS else {
             phase = .idle
             overlay.hide()
             return
         }
         playSound("Pop")
-        phase = .transcribing
         overlay.show(.transcribing)
 
         let prompt = settings.prompt
@@ -175,12 +197,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.overlay.hide()
                     return
                 }
-                self.lastText = text
+                self.remember(text)
                 TextInserter.insert(text + " ")
                 self.overlay.show(.done)
                 self.overlay.hide(after: 0.7)
             }
         }
+    }
+
+    private func remember(_ text: String) {
+        history.insert(text, at: 0)
+        if history.count > historyLimit { history.removeLast(history.count - historyLimit) }
     }
 
     private func playSound(_ name: String) {
@@ -194,11 +221,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
+        menu.delegate = self
         stateMenuItem.isEnabled = false
         menu.addItem(stateMenuItem)
         menu.addItem(.separator())
-        copyLastMenuItem.target = self
-        menu.addItem(copyLastMenuItem)
+        menu.addItem(submenuItem("Записи", historyMenu))
+        menu.addItem(.separator())
+        menu.addItem(submenuItem("Мікрофон", microphoneMenu))
+        menu.addItem(submenuItem("Мова", languageMenu))
+        menu.addItem(submenuItem("Клавіша", triggerKeyMenu))
+        menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Налаштування…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -206,6 +238,106 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Вийти з Holos", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         updateStatusItem()
+    }
+
+    /// Підменю збираються щоразу перед показом: мікрофон могли під'єднати чи від'єднати,
+    /// а мову чи клавішу — змінити у вікні налаштувань
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem.menu else { return }
+        fillHistoryMenu()
+        fillMicrophoneMenu()
+        fillLanguageMenu()
+        fillTriggerKeyMenu()
+    }
+
+    private func fillHistoryMenu() {
+        historyMenu.removeAllItems()
+        guard !history.isEmpty else {
+            let empty = NSMenuItem(title: "Поки що нічого не продиктовано", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            historyMenu.addItem(empty)
+            return
+        }
+        historyMenu.addItem(.sectionHeader(title: "Клацніть, щоб скопіювати"))
+        for text in history {
+            let item = NSMenuItem(title: Self.preview(text), action: #selector(copyRecord(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = text
+            item.toolTip = text
+            historyMenu.addItem(item)
+        }
+        historyMenu.addItem(.separator())
+        let clear = NSMenuItem(title: "Очистити", action: #selector(clearHistory), keyEquivalent: "")
+        clear.target = self
+        historyMenu.addItem(clear)
+    }
+
+    private func fillMicrophoneMenu() {
+        microphoneMenu.removeAllItems()
+        let selected = settings.microphoneUID
+        let action = #selector(selectMicrophone(_:))
+        let system = AudioDevices.defaultInput().map { "Системний за замовчуванням — \($0.name)" } ?? "Системний за замовчуванням"
+        microphoneMenu.addItem(choice(system, "", selected: selected.isEmpty, action: action))
+        microphoneMenu.addItem(.separator())
+        let devices = AudioDevices.inputs()
+        for device in devices {
+            microphoneMenu.addItem(choice(device.name, device.uid, selected: device.uid == selected, action: action))
+        }
+        if !selected.isEmpty && !devices.contains(where: { $0.uid == selected }) {
+            microphoneMenu.addItem(choice("Від’єднаний мікрофон", selected, selected: true, action: action))
+        }
+    }
+
+    private func fillLanguageMenu() {
+        languageMenu.removeAllItems()
+        let selected = settings.language
+        let action = #selector(selectLanguage(_:))
+        languageMenu.addItem(choice("Автовизначення", DictationLanguage.auto, selected: selected == DictationLanguage.auto, action: action))
+        languageMenu.addItem(.separator())
+        var top = DictationLanguage.pinned
+        // Вибрану з «Інших мов» теж показуємо тут, щоб одразу було видно, яка зараз
+        if let current = DictationLanguage.others.first(where: { $0.code == selected }) { top.append(current) }
+        for language in top {
+            languageMenu.addItem(choice(language.name, language.code, selected: language.code == selected, action: action))
+        }
+        languageMenu.addItem(.separator())
+        let others = NSMenu()
+        for language in DictationLanguage.others {
+            others.addItem(choice(language.name, language.code, selected: language.code == selected, action: action))
+        }
+        languageMenu.addItem(submenuItem("Інші мови", others))
+    }
+
+    private func fillTriggerKeyMenu() {
+        triggerKeyMenu.removeAllItems()
+        for key in TriggerKey.allCases {
+            triggerKeyMenu.addItem(choice(key.title, key.rawValue, selected: key == settings.triggerKey, action: #selector(selectTriggerKey(_:))))
+        }
+    }
+
+    private func submenuItem(_ title: String, _ submenu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
+    private func choice(_ title: String, _ value: String, selected: Bool, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = value
+        item.state = selected ? .on : .off
+        return item
+    }
+
+    /// Початок тексту для меню «Записи»: до `limit` символів, по межі слова, з трикрапкою
+    private static func preview(_ text: String, limit: Int = 40) -> String {
+        let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        guard line.count > limit else { return line }
+        let head = line.prefix(limit)
+        // Різати по пробілу, лише якщо від тексту лишається хоча б половина
+        let wordEnd = head.lastIndex(of: " ").flatMap { head.distance(from: head.startIndex, to: $0) > limit / 2 ? $0 : nil }
+        let cut = wordEnd.map { head[..<$0] } ?? head
+        return cut.trimmingCharacters(in: .whitespaces.union(.punctuationCharacters)) + "…"
     }
 
     private func updateStatusItem() {
@@ -226,6 +358,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case (.idle, .ready):
             if !status.accessibilityAllowed || !status.microphoneAllowed {
                 symbol = "exclamationmark.triangle"; text = "Потрібні дозволи — відкрийте налаштування"
+            } else if let lastError {
+                symbol = "mic.slash"; text = "Запис не вдався: \(lastError)"
             } else {
                 text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть · \(DictationLanguage.name(for: settings.language))"
             }
@@ -236,7 +370,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = image
         button.contentTintColor = tint
         stateMenuItem.title = text
-        copyLastMenuItem.isHidden = lastText.isEmpty
     }
 
     /// Іконка для рядка меню: п'ять смужок звукової хвилі, як на іконці застосунку
@@ -258,9 +391,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }()
 
-    @objc private func copyLast() {
+    @objc private func copyRecord(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lastText, forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc private func clearHistory() {
+        history.removeAll()
+    }
+
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        settings.microphoneUID = sender.representedObject as? String ?? ""
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String else { return }
+        settings.language = code
+    }
+
+    @objc private func selectTriggerKey(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let key = TriggerKey(rawValue: raw) else { return }
+        settings.triggerKey = key
     }
 
     @objc private func openSettings() {
