@@ -9,11 +9,13 @@ if [[ ! -d Vendor/whisper.xcframework || ! -f Resources/ggml-silero-v6.2.0.bin ]
 fi
 
 swift build -c release --arch arm64
+# Тека з результатом залежить від версії Swift (.build/arm64-apple-macosx/release, .build/out/Products/Release…)
+BIN_PATH="$(swift build -c release --arch arm64 --show-bin-path)"
 
 APP=build/Holos.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
-cp .build/arm64-apple-macosx/release/Holos "$APP/Contents/MacOS/Holos"
+cp "$BIN_PATH/Holos" "$APP/Contents/MacOS/Holos"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/ggml-silero-v6.2.0.bin Resources/AppIcon.icns "$APP/Contents/Resources/"
 cp -R Vendor/whisper.xcframework/macos-arm64_x86_64/whisper.framework "$APP/Contents/Frameworks/"
