@@ -19,6 +19,19 @@ final class Transcriber {
     static let beamSize = 5
     static let vadPaddingMs = 200
     static let vadModelName = "Silero VAD v6.2.0"
+    /// Довші фрази з Options.fastLongPhrases декодуються жадібно
+    static let greedyAfterSeconds = 8.0
+    /// Скільки разів whisper за замовчуванням повторює розпізнавання з вищою «температурою» (0,2 … 1,0)
+    static let fallbackRetries = 5
+
+    /// Експериментальні параметри (див. ExperimentalPane)
+    struct Options {
+        /// Жадібне декодування замість beam search для фраз, довших за greedyAfterSeconds:
+        /// на 14-секундній фразі на чверть швидше, але на нечіткому мовленні beam search буває точнішим
+        var fastLongPhrases = false
+        /// Без повторних спроб: відповідь завжди швидка, але на поганому звуці текст може бути гіршим
+        var noFallback = false
+    }
 
     private var context: OpaquePointer?
 
@@ -62,8 +75,31 @@ final class Transcriber {
         context = ctx
     }
 
+    /// Перше розпізнавання після завантаження повільніше (~0,8 с на M1 Max): Metal готує конвеєри.
+    /// Розпізнаємо секунду тиші, щоб це сталося одразу, а не на першому диктуванні.
+    func warmUp() {
+        guard let context else { return }
+        var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
+        params.n_threads = Self.threads
+        params.no_context = true
+        params.no_timestamps = true
+        params.print_progress = false
+        params.print_realtime = false
+        params.print_timestamps = false
+        let language = strdup("uk")
+        defer { free(language) }
+        params.language = UnsafePointer(language)
+        // Без VAD: на тиші він пропустив би енкодер, а прогріти треба саме його
+        let silence = [Float](repeating: 0, count: Int(AudioRecorder.sampleRate))
+        _ = silence.withUnsafeBufferPointer { whisper_full(context, params, $0.baseAddress, Int32($0.count)) }
+    }
+
+    private static var threads: Int32 {
+        Int32(max(2, min(8, ProcessInfo.processInfo.activeProcessorCount - 2)))
+    }
+
     /// `language` — код мови whisper або «auto» (тоді whisper визначає мову за першими 30 с)
-    func transcribe(_ input: [Float], prompt: String, language: String) -> String {
+    func transcribe(_ input: [Float], prompt: String, language: String, options: Options = Options()) -> String {
         guard let context, !input.isEmpty else { return "" }
 
         // Трохи тиші в кінці, щоб whisper не обрізав останнє слово, і мінімум 1 с загалом
@@ -71,9 +107,14 @@ final class Transcriber {
         let minimum = Int(AudioRecorder.sampleRate * 1.0)
         if samples.count < minimum { samples += [Float](repeating: 0, count: minimum - samples.count) }
 
-        var params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH)
+        let greedy = options.fastLongPhrases && Double(input.count) / AudioRecorder.sampleRate > Self.greedyAfterSeconds
+        var params = whisper_full_default_params(greedy ? WHISPER_SAMPLING_GREEDY : WHISPER_SAMPLING_BEAM_SEARCH)
         params.beam_search.beam_size = Int32(Self.beamSize)
-        params.n_threads = Int32(max(2, min(8, ProcessInfo.processInfo.activeProcessorCount - 2)))
+        if options.noFallback {
+            // Лише одна спроба з температурою 0
+            params.temperature_inc = 0
+        }
+        params.n_threads = Self.threads
         params.translate = false
         params.no_context = true
         params.no_timestamps = true

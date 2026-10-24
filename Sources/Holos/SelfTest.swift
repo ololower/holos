@@ -5,7 +5,8 @@ import SwiftUI
 /// Перевірка розпізнавання з файлу без інтерфейсу й мікрофона.
 /// Аудіо проходить через той самий конвертер, що й запис із мікрофона.
 enum SelfTest {
-    static func run(file: String, modelPath: String, prompt: String, language: String) -> Int32 {
+    static func run(file: String, modelPath: String, prompt: String, language: String,
+                    options: Transcriber.Options = Transcriber.Options(), warmUp: Bool = false) -> Int32 {
         let audioFile: AVAudioFile
         do {
             audioFile = try AVAudioFile(forReading: URL(fileURLWithPath: file))
@@ -40,12 +41,17 @@ enum SelfTest {
             return 1
         }
         print(String(format: "Модель завантажено за %.2f с", Date().timeIntervalSince(loadStart)))
+        if warmUp {
+            let warmStart = Date()
+            transcriber.warmUp()
+            print(String(format: "Прогріто за %.2f с", Date().timeIntervalSince(warmStart)))
+        }
 
         if !prompt.isEmpty {
             print("Підказка: \(transcriber.tokenCount(prompt)) токенів з \(Transcriber.maxPromptTokens)")
         }
         let start = Date()
-        let text = transcriber.transcribe(samples, prompt: prompt, language: language)
+        let text = transcriber.transcribe(samples, prompt: prompt, language: language, options: options)
         let detected = language == DictationLanguage.auto ? ", визначено: \(transcriber.lastLanguage ?? "?")" : ""
         print(String(format: "Розпізнано за %.2f с (мова: %@%@):", Date().timeIntervalSince(start), language, detected))
         print(text)
@@ -97,6 +103,33 @@ enum SelfTest {
         print(String(format: "Записано: %.2f с з %.1f с, RMS %.4f",
                      Double(recorded.count) / AudioRecorder.sampleRate, seconds, Transcriber.rms(recorded)))
         return recorded.isEmpty ? 2 : 0
+    }
+
+    /// Знімки кожної вкладки вікна налаштувань у PNG (вікно на мить з'являється за межами екрана)
+    @MainActor
+    static func renderSettings(to directory: String) -> Int32 {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let controller = SettingsWindowController()
+        guard let window = controller.window else { return 1 }
+        for tab in SettingsWindowController.Tab.allCases {
+            controller.select(tab)
+            window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+            window.orderFrontRegardless()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+            // Разом із заголовком і панеллю вкладок
+            guard let frameView = window.contentView?.superview,
+                  let bitmap = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds)
+            else { return 1 }
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            let path = (directory as NSString).appendingPathComponent("settings-\(tab.rawValue).png")
+            guard let png = bitmap.representation(using: .png, properties: [:]),
+                  (try? png.write(to: URL(fileURLWithPath: path))) != nil
+            else { return 1 }
+            print("Збережено: \(path) (\(Int(window.frame.width))×\(Int(window.frame.height)))")
+        }
+        window.orderOut(nil)
+        return 0
     }
 
     /// Аркуш із ключовими кадрами пігулки: (підпис, фази, коли змінилася остання, гучність, момент кадру)

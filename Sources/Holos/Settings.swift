@@ -93,9 +93,30 @@ final class Settings: ObservableObject {
         didSet { defaults.set(handsFree, forKey: "handsFree") }
     }
 
+    // MARK: Експериментальне (див. ExperimentalPane): усе вимкнено за замовчуванням
+
     /// Не закривати мікрофон одразу після диктування, щоб наступне почалося миттєво
     @Published var keepMicrophoneWarm: Bool {
         didSet { defaults.set(keepMicrophoneWarm, forKey: "keepMicrophoneWarm") }
+    }
+
+    /// Після завантаження моделі розпізнати секунду тиші, щоб перше диктування не було повільнішим
+    @Published var warmUpModel: Bool {
+        didSet { defaults.set(warmUpModel, forKey: "experimentalWarmUp") }
+    }
+
+    /// Жадібне декодування замість beam search для фраз, довших за Transcriber.greedyAfterSeconds
+    @Published var fastLongPhrases: Bool {
+        didSet { defaults.set(fastLongPhrases, forKey: "experimentalFastLongPhrases") }
+    }
+
+    /// Без повторних спроб розпізнавання з вищою «температурою»
+    @Published var noFallback: Bool {
+        didSet { defaults.set(noFallback, forKey: "experimentalNoFallback") }
+    }
+
+    var transcriberOptions: Transcriber.Options {
+        Transcriber.Options(fastLongPhrases: fastLongPhrases, noFallback: noFallback)
     }
 
     /// Заміни після розпізнавання, по одній на рядок: «що → на що» (див. Replacements)
@@ -131,6 +152,9 @@ final class Settings: ObservableObject {
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
         keepMicrophoneWarm = defaults.bool(forKey: "keepMicrophoneWarm")
+        warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
+        fastLongPhrases = defaults.bool(forKey: "experimentalFastLongPhrases")
+        noFallback = defaults.bool(forKey: "experimentalNoFallback")
         replacements = defaults.string(forKey: "replacements") ?? ""
         restartAfterCrash = defaults.object(forKey: "restartAfterCrash") as? Bool ?? true
         // Для мікрофона, вибраного до появи microphoneName

@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let microphoneMenu = NSMenu()
     private let languageMenu = NSMenu()
     private let triggerKeyMenu = NSMenu()
-    private var settingsWindow: NSWindow?
+    private lazy var settingsWindow = SettingsWindowController()
     private var cancellables = Set<AnyCancellable>()
     private var permissionTimer: Timer?
     private var maxDurationTimer: Timer?
@@ -129,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Permissions.requestAccessibility()
         }
         if !Permissions.microphoneAllowed || !Permissions.accessibilityAllowed {
-            openSettings()
+            settingsWindow.show(.general)
         }
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refreshPermissions()
@@ -158,14 +158,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadModel(path: String) {
         status.model = .loading
+        let warmUp = settings.warmUpModel
         work.async { [transcriber, status] in
             let start = Date()
             do {
                 try transcriber.load(path: path)
                 let seconds = Date().timeIntervalSince(start)
                 DispatchQueue.main.async { status.model = .ready(loadSeconds: seconds) }
+                Log.app.info("Модель завантажено за \(seconds, format: .fixed(precision: 1)) с")
             } catch {
                 DispatchQueue.main.async { status.model = .failed(error.localizedDescription) }
+                return
+            }
+            // Диктування, якщо почнеться зараз, почекає в цій самій черзі
+            if warmUp {
+                let warmStart = Date()
+                transcriber.warmUp()
+                Log.app.info("Модель прогріто за \(Date().timeIntervalSince(warmStart), format: .fixed(precision: 1)) с")
             }
         }
     }
@@ -268,10 +277,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let prompt = settings.prompt
         let language = settings.language
         let replacements = Replacements(settings.replacements)
+        let options = settings.transcriberOptions
         let seconds = Double(samples.count) / AudioRecorder.sampleRate
         let started = Date()
         work.async { [weak self, transcriber] in
-            let text = replacements.apply(to: transcriber.transcribe(samples, prompt: prompt, language: language))
+            let raw = transcriber.transcribe(samples, prompt: prompt, language: language, options: options)
+            let text = replacements.apply(to: raw)
             DispatchQueue.main.async {
                 guard let self else { return }
                 Log.dictation.info("Розпізнано \(seconds, format: .fixed(precision: 1)) с аудіо за \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) с: \(text.count) символів")
@@ -533,24 +544,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSettings() {
-        if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-            window.title = "Holos"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.setContentSize(SettingsView.size)
-            settingsWindow = window
-        }
-        guard let window = settingsWindow else { return }
-        // Щоразу точно по центру екрана, на якому зараз курсор
-        // (стандартний center() ставить вікно вище середини)
-        let mouse = NSEvent.mouseLocation
-        if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main {
-            let area = screen.visibleFrame
-            let size = window.frame.size
-            window.setFrameOrigin(NSPoint(x: (area.midX - size.width / 2).rounded(), y: (area.midY - size.height / 2).rounded()))
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        settingsWindow.show()
     }
 }
