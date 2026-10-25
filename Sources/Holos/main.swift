@@ -7,16 +7,18 @@ if Watchdog.isWatchdogProcess {
 }
 
 // Режим перевірки без інтерфейсу:
-// Holos --transcribe <аудіофайл> [--model <шлях>] [--prompt <підказка>] [--language <код|auto>]
-//       [--warmup] [--fast-long] [--no-fallback]   — експериментальні параметри
+// Holos --transcribe <аудіофайл> [--engine whisper|parakeet] [--model <шлях>] [--prompt <підказка>]
+//       [--language <код|auto>] [--warmup] [--fast-long] [--no-fallback]   — експериментальні параметри
 if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < CommandLine.arguments.count {
     func option(_ name: String) -> String? {
         guard let j = CommandLine.arguments.firstIndex(of: name), j + 1 < CommandLine.arguments.count else { return nil }
         return CommandLine.arguments[j + 1]
     }
     let flags = Set(CommandLine.arguments)
+    let engine = SpeechEngineKind(rawValue: option("--engine") ?? "") ?? .whisper
     exit(SelfTest.run(file: CommandLine.arguments[i + 1],
-                      modelPath: option("--model") ?? Settings.defaultModelPath,
+                      engineKind: engine,
+                      modelPath: option("--model") ?? (engine == .parakeet ? Settings.defaultParakeetModelPath : Settings.defaultModelPath),
                       prompt: option("--prompt") ?? "",
                       language: option("--language") ?? DictationLanguage.defaultCode,
                       options: Transcriber.Options(fastLongPhrases: flags.contains("--fast-long"),

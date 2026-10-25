@@ -8,7 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = Settings.shared
     private let status = AppStatus.shared
     private let recorder = AudioRecorder()
-    private let transcriber = Transcriber()
+    private let whisper = Transcriber()
+    /// Експериментальний рушій (Settings.engine)
+    private let parakeet = ParakeetEngine()
+    /// Рушій, модель якого зараз завантажено чи вантажиться
+    private lazy var engine: SpeechEngine = whisper
     private let hotkey = HotkeyMonitor()
     private lazy var overlay = OverlayController()
     /// Уся робота з whisper — лише в цій черзі
@@ -82,23 +86,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async { self?.updateStatusItem() }
         }.store(in: &cancellables)
 
-        settings.$modelPath.dropFirst().removeDuplicates()
+        // Перезавантажуємо лише тоді, коли змінився рушій чи модель саме вибраного рушія
+        Publishers.CombineLatest3(settings.$engine, settings.$modelPath, settings.$parakeetModelPath)
+            .map { engine, whisperPath, parakeetPath in "\(engine.rawValue):\(engine == .parakeet ? parakeetPath : whisperPath)" }
+            .removeDuplicates()
+            .dropFirst()
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
-            .sink { [weak self] path in self?.loadModel(path: path) }
+            .sink { [weak self] _ in
+                self?.loadModel()
+                self?.updateStatusItem()
+            }
             .store(in: &cancellables)
 
         status.$model.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async { self?.updateStatusItem() }
         }.store(in: &cancellables)
 
-        loadModel(path: settings.modelPath)
+        loadModel()
         setupPermissions()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         Watchdog.markStopped()
-        // У черзі whisper: якщо якраз іде розпізнавання, дочекаємося його
-        work.sync { transcriber.unload() }
+        // У черзі розпізнавання: якщо воно якраз іде, дочекаємося його
+        work.sync {
+            whisper.unload()
+            parakeet.unload()
+        }
         Log.app.notice("Holos завершено")
     }
 
@@ -156,16 +170,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Модель
 
-    private func loadModel(path: String) {
+    /// Модель вибраного рушія; модель іншого звільняється, щоб не тримати в пам'яті обидві
+    private func loadModel() {
         status.model = .loading
+        let kind = settings.engine
+        let path = settings.activeModelPath
         let warmUp = settings.warmUpModel
-        work.async { [transcriber, status] in
+        let (active, inactive): (SpeechEngine, SpeechEngine) = kind == .parakeet ? (parakeet, whisper) : (whisper, parakeet)
+        engine = active
+        work.async { [status] in
+            inactive.unload()
             let start = Date()
             do {
-                try transcriber.load(path: path)
+                try active.load(path: path)
                 let seconds = Date().timeIntervalSince(start)
                 DispatchQueue.main.async { status.model = .ready(loadSeconds: seconds) }
-                Log.app.info("Модель завантажено за \(seconds, format: .fixed(precision: 1)) с")
+                Log.app.info("Модель \(kind.rawValue, privacy: .public) завантажено за \(seconds, format: .fixed(precision: 1)) с")
             } catch {
                 DispatchQueue.main.async { status.model = .failed(error.localizedDescription) }
                 return
@@ -173,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Диктування, якщо почнеться зараз, почекає в цій самій черзі
             if warmUp {
                 let warmStart = Date()
-                transcriber.warmUp()
+                active.warmUp()
                 Log.app.info("Модель прогріто за \(Date().timeIntervalSince(warmStart), format: .fixed(precision: 1)) с")
             }
         }
@@ -280,8 +300,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let options = settings.transcriberOptions
         let seconds = Double(samples.count) / AudioRecorder.sampleRate
         let started = Date()
-        work.async { [weak self, transcriber] in
-            let raw = transcriber.transcribe(samples, prompt: prompt, language: language, options: options)
+        work.async { [weak self, engine] in
+            let raw = engine.transcribe(samples, prompt: prompt, language: language, options: options)
             let text = replacements.apply(to: raw)
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -479,7 +499,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else if let notice {
                 text = notice
             } else {
-                text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть · \(DictationLanguage.name(for: settings.language))"
+                let engineNote = settings.engine == .parakeet ? " · Parakeet" : ""
+                text = "Готово — тримайте \(settings.triggerKey.shortTitle) і говоріть · \(DictationLanguage.name(for: settings.language))\(engineNote)"
             }
         }
 

@@ -5,7 +5,7 @@ import SwiftUI
 /// Перевірка розпізнавання з файлу без інтерфейсу й мікрофона.
 /// Аудіо проходить через той самий конвертер, що й запис із мікрофона.
 enum SelfTest {
-    static func run(file: String, modelPath: String, prompt: String, language: String,
+    static func run(file: String, engineKind: SpeechEngineKind = .whisper, modelPath: String, prompt: String, language: String,
                     options: Transcriber.Options = Transcriber.Options(), warmUp: Bool = false) -> Int32 {
         let audioFile: AVAudioFile
         do {
@@ -32,27 +32,28 @@ enum SelfTest {
         let seconds = Double(samples.count) / AudioRecorder.sampleRate
         print(String(format: "Аудіо: %.1f с (%.0f Гц → 16000 Гц)", seconds, format.sampleRate))
 
-        let transcriber = Transcriber()
+        let engine: SpeechEngine = engineKind == .parakeet ? ParakeetEngine() : Transcriber()
         let loadStart = Date()
         do {
-            try transcriber.load(path: modelPath)
+            try engine.load(path: modelPath)
         } catch {
             print(error.localizedDescription)
             return 1
         }
-        print(String(format: "Модель завантажено за %.2f с", Date().timeIntervalSince(loadStart)))
+        print(String(format: "Модель (%@) завантажено за %.2f с", engineKind.rawValue, Date().timeIntervalSince(loadStart)))
         if warmUp {
             let warmStart = Date()
-            transcriber.warmUp()
+            engine.warmUp()
             print(String(format: "Прогріто за %.2f с", Date().timeIntervalSince(warmStart)))
         }
 
-        if !prompt.isEmpty {
-            print("Підказка: \(transcriber.tokenCount(prompt)) токенів з \(Transcriber.maxPromptTokens)")
+        let whisper = engine as? Transcriber
+        if let whisper, !prompt.isEmpty {
+            print("Підказка: \(whisper.tokenCount(prompt)) токенів з \(Transcriber.maxPromptTokens)")
         }
         let start = Date()
-        let text = transcriber.transcribe(samples, prompt: prompt, language: language, options: options)
-        let detected = language == DictationLanguage.auto ? ", визначено: \(transcriber.lastLanguage ?? "?")" : ""
+        let text = engine.transcribe(samples, prompt: prompt, language: language, options: options)
+        let detected = whisper != nil && language == DictationLanguage.auto ? ", визначено: \(whisper?.lastLanguage ?? "?")" : ""
         print(String(format: "Розпізнано за %.2f с (мова: %@%@):", Date().timeIntervalSince(start), language, detected))
         print(text)
         let replaced = Settings.shared.replacements.apply(to: text)

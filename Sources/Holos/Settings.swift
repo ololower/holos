@@ -56,6 +56,14 @@ final class Settings: ObservableObject {
         supportDirectory.appendingPathComponent("models", isDirectory: true)
     }
 
+    /// Тека Core ML-моделі Parakeet: ultra, якщо завантажена (точніша), інакше v3
+    static var defaultParakeetModelPath: String {
+        let ultra = modelsDirectory.appendingPathComponent("parakeet-ultra-coreml").path
+        return FileManager.default.fileExists(atPath: ultra)
+            ? ultra
+            : modelsDirectory.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml").path
+    }
+
     /// Скільки мікрофон лишається відкритим після диктування, якщо ввімкнено keepMicrophoneWarm
     static let warmMicrophoneSeconds = 10.0
 
@@ -143,8 +151,23 @@ final class Settings: ObservableObject {
         didSet { defaults.set(restartAfterCrash, forKey: "restartAfterCrash") }
     }
 
+    /// Файл моделі whisper
     @Published var modelPath: String {
         didSet { defaults.set(modelPath, forKey: "modelPath") }
+    }
+
+    /// Рушій розпізнавання; Parakeet — експериментальний
+    @Published var engine: SpeechEngineKind {
+        didSet { defaults.set(engine.rawValue, forKey: "engine") }
+    }
+
+    @Published var parakeetModelPath: String {
+        didSet { defaults.set(parakeetModelPath, forKey: "parakeetModelPath") }
+    }
+
+    /// Модель рушія, який зараз вибрано
+    var activeModelPath: String {
+        engine == .parakeet ? parakeetModelPath : modelPath
     }
 
     /// Підказка для whisper: імена, терміни, бажаний стиль
@@ -163,6 +186,8 @@ final class Settings: ObservableObject {
         microphoneName = defaults.string(forKey: "microphoneName") ?? ""
         microphoneGains = defaults.dictionary(forKey: "microphoneGains") as? [String: Double] ?? [:]
         modelPath = defaults.string(forKey: "modelPath") ?? Settings.defaultModelPath
+        engine = SpeechEngineKind(rawValue: defaults.string(forKey: "engine") ?? "") ?? .whisper
+        parakeetModelPath = defaults.string(forKey: "parakeetModelPath") ?? Settings.defaultParakeetModelPath
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true

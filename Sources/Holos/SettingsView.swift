@@ -350,18 +350,22 @@ struct RecognitionPane: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Файл") {
+                LabeledContent(isParakeet ? "Тека" : "Файл") {
                     HStack {
-                        Text((settings.modelPath as NSString).lastPathComponent)
+                        Text((settings.activeModelPath as NSString).lastPathComponent)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .help(settings.modelPath)
+                            .help(settings.activeModelPath)
                         Button("Вибрати…", action: chooseModel)
                     }
                 }
                 LabeledContent("Стан") { modelStatus }
             } header: {
-                Text("Модель whisper")
+                Text(isParakeet ? "Модель Parakeet (експериментально)" : "Модель whisper")
+            } footer: {
+                if isParakeet {
+                    Footnote("Рушій змінюється на вкладці «Експериментальне».")
+                }
             }
 
             Section {
@@ -369,13 +373,20 @@ struct RecognitionPane: View {
             } header: {
                 Text("Підказка")
             } footer: {
-                Footnote("Слова в потрібному написанні, наприклад «Олексій, Kubernetes, PhpStorm, пулреквест.» Модель сприймає підказку як попередню репліку й копіює з неї написання, регістр і розділові знаки: підказка з малої літери дає речення з малої. Тож пишіть із великої й ставте крапку в кінці, тією мовою, якою диктуєте.")
+                VStack(alignment: .leading, spacing: 6) {
+                    if isParakeet {
+                        Footnote("Parakeet підказку не використовує — для нього працюють лише заміни.", warning: true)
+                    }
+                    Footnote("Слова в потрібному написанні, наприклад «Олексій, Kubernetes, PhpStorm, пулреквест.» Модель сприймає підказку як попередню репліку й копіює з неї написання, регістр і розділові знаки: підказка з малої літери дає речення з малої. Тож пишіть із великої й ставте крапку в кінці, тією мовою, якою диктуєте.")
+                }
             }
 
             Section {
                 DisclosureGroup("Що саме отримує модель") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Whisper — модель розпізнавання, а не чат: інструкцій вона не виконує, прихованого системного промпту немає. Єдиний текст, який вона отримує, — ваша підказка.")
+                        Text(isParakeet
+                             ? "Parakeet отримує лише звук: підказок і інструкцій він не приймає."
+                             : "Whisper — модель розпізнавання, а не чат: інструкцій вона не виконує, прихованого системного промпту немає. Єдиний текст, який вона отримує, — ваша підказка.")
                             .foregroundStyle(.secondary)
                         Text(modelInputDescription)
                             .font(.system(.callout, design: .monospaced))
@@ -389,8 +400,11 @@ struct RecognitionPane: View {
         .frame(width: paneWidth, height: 640)
     }
 
+    private var isParakeet: Bool { settings.engine == .parakeet }
+
     /// Збирається з тих самих констант, які використовує Transcriber
     private var modelInputDescription: String {
+        if isParakeet { return parakeetInputDescription }
         let prompt = settings.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let vad = Transcriber.vadModelPath != nil
             ? "\(Transcriber.vadModelName), запас \(Transcriber.vadPaddingMs) мс"
@@ -421,6 +435,25 @@ struct RecognitionPane: View {
         """
     }
 
+    /// Збирається з тих самих констант, які використовує ParakeetEngine
+    private var parakeetInputDescription: String {
+        let language: String
+        switch settings.language {
+        case DictationLanguage.auto: language = "визначає сама (25 європейських мов)"
+        case "uk": language = "визначає сама; не пише ы э ъ ё, токени з і ї є ґ отримують +\(Int(LanguageBias.ukrainianBonus)) до оцінки"
+        default: language = "визначає сама; не пише літер, яких немає в мові «\(settings.language)»"
+        }
+        return """
+        аудіо           16 кГц, моно, лише з пам'яті
+        вікно           15 с; довший запис ріжеться в паузах
+        мова            \(language)
+        підказка        не використовується
+        декодування     TDT, жадібне
+        VAD             немає (тишу відсікає Holos до розпізнавання)
+        після моделі    заміни: \(settings.replacements.rules.count) правил (вкладка «Заміни»)
+        """
+    }
+
     @ViewBuilder
     private var modelStatus: some View {
         switch status.model {
@@ -438,12 +471,21 @@ struct RecognitionPane: View {
 
     private func chooseModel() {
         let panel = NSOpenPanel()
-        panel.title = "Виберіть модель whisper (ggml-*.bin)"
-        panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data]
         panel.directoryURL = Settings.modelsDirectory
-        panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
+        if isParakeet {
+            panel.title = "Виберіть теку моделі Parakeet (parakeet-ultra-coreml чи parakeet-tdt-0.6b-v3-coreml)"
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+        } else {
+            panel.title = "Виберіть модель whisper (ggml-*.bin)"
+            panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data]
+            panel.canChooseDirectories = false
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if isParakeet {
+            settings.parakeetModelPath = url.path
+        } else {
             settings.modelPath = url.path
         }
     }
@@ -557,6 +599,22 @@ struct ExperimentalPane: View {
             }
 
             Section {
+                Picker("Рушій", selection: $settings.engine) {
+                    ForEach(SpeechEngineKind.allCases) { Text($0.title).tag($0) }
+                }
+            } header: {
+                Label("Рушій розпізнавання — може вплинути на якість", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Footnote("Parakeet (NVIDIA, 25 європейських мов) розпізнає в 10–14 разів швидше за whisper: фраза в 14 с — 0,17 с замість 2,4 с. Мову визначає сам, тож на коротких фразах може з’їхати в російську — для української Holos схиляє його до українських варіантів, але не завжди встигає. Підказки не використовує, заміни працюють. Перший запуск — до 20 с: macOS готує модель для Neural Engine.")
+                    if isParakeet && !parakeetModelInstalled {
+                        Footnote("Модель не завантажено. У теці проєкту: scripts/download-model.sh parakeet-ultra", warning: true)
+                    }
+                }
+            }
+
+            Section {
                 DescribedToggle(title: "Швидше розпізнавати довгі фрази",
                                 description: "Для фраз, довших за \(Int(Transcriber.greedyAfterSeconds)) с, — жадібне декодування замість beam search: на 14-секундній фразі на 15–25 % швидше, текст у тесті той самий. На нечіткому мовленні beam search іноді знаходить кращий варіант. Короткі фрази не змінюються.",
                                 isOn: $settings.fastLongPhrases)
@@ -564,13 +622,27 @@ struct ExperimentalPane: View {
                                 description: "Коли результат виглядає ненадійним, whisper розпізнає фразу ще до \(Transcriber.fallbackRetries) разів — це може бути зависанням на кілька секунд, а без повторів відповідь завжди швидка. У тестах повтори не знадобилися жодного разу, навіть на зашумленому звуці, тож це радше страховка від рідкісних випадків. Там, де повтор допоміг би, текст буде гіршим.",
                                 isOn: $settings.noFallback)
             } header: {
-                Label("Може вплинути на якість", systemImage: "exclamationmark.triangle.fill")
+                Label("Whisper — може вплинути на якість", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             } footer: {
-                Footnote("Заміри — на M1 Max із моделлю large-v3 і синтетичним голосом; на живому голосі різниця може бути іншою. Що саме змінюється для моделі, видно на вкладці «Розпізнавання» → «Що саме отримує модель».")
+                VStack(alignment: .leading, spacing: 6) {
+                    if isParakeet {
+                        Footnote("Ці два налаштування — лише для whisper.", warning: true)
+                    }
+                    Footnote("Заміри — на M1 Max із моделлю large-v3 і синтетичним голосом; на живому голосі різниця може бути іншою. Що саме змінюється для моделі, видно на вкладці «Розпізнавання» → «Що саме отримує модель».")
+                }
             }
+            .disabled(isParakeet)
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 570)
+        .frame(width: paneWidth, height: 680)
+    }
+
+    private var isParakeet: Bool { settings.engine == .parakeet }
+
+    private var parakeetModelInstalled: Bool {
+        ParakeetEngine.requiredFiles.allSatisfy {
+            FileManager.default.fileExists(atPath: (settings.parakeetModelPath as NSString).appendingPathComponent($0))
+        }
     }
 }
