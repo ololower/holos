@@ -58,6 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Log.app.notice("Запущено агентом після збою")
         }
         Watchdog.sync(enabled: settings.restartAfterCrash)
+        // Завантажили не ту модель, що вибрана (наприклад, лише Parakeet), — беремо ту, що є
+        if let model = settings.useInstalledModelIfMissing() {
+            Log.app.notice("Вибраної моделі немає, беру \(model.title, privacy: .public)")
+        }
         setupStatusItem()
 
         hotkey.key = settings.triggerKey

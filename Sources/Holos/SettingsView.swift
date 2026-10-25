@@ -395,18 +395,9 @@ struct RecognitionPane: View {
             get: { settings.activeModelPath },
             set: { path in
                 guard let model = models.first(where: { $0.path == path }) else { return }
-                use(model.path, engine: model.engine)
+                settings.use(model.path, engine: model.engine)
             }
         )
-    }
-
-    private func use(_ path: String, engine: SpeechEngineKind) {
-        if engine == .parakeet {
-            settings.parakeetModelPath = path
-        } else {
-            settings.modelPath = path
-        }
-        settings.engine = engine
     }
 
     /// Збирається з тих самих констант, які використовує рушій
@@ -481,9 +472,9 @@ struct RecognitionPane: View {
         panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data, .folder]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if ParakeetEngine.isModelDirectory(url.path) {
-            use(url.path, engine: .parakeet)
+            settings.use(url.path, engine: .parakeet)
         } else if url.pathExtension == "bin" {
-            use(url.path, engine: .whisper)
+            settings.use(url.path, engine: .whisper)
         }
         models = InstalledModel.scan()
     }

@@ -37,11 +37,13 @@
 git clone https://github.com/ololower/holos.git Holos
 cd Holos
 scripts/fetch-deps.sh        # whisper.cpp і Silero VAD (58 МБ), з перевіркою SHA-256
-scripts/download-model.sh    # модель розпізнавання (1,1 ГБ)
-scripts/download-model.sh parakeet-ultra   # необов'язково: швидший рушій Parakeet (0,6 ГБ)
+scripts/download-model.sh                  # Whisper, 1,1 ГБ
+scripts/download-model.sh parakeet-ultra   # Parakeet, 0,6 ГБ, у 10 разів швидший
 scripts/setup-signing.sh     # рекомендовано: постійний локальний підпис, див. «Підпис і дозволи»
 scripts/build.sh --install   # збирає, копіює в /Applications і запускає
 ```
+
+Вистачає будь-якої однієї моделі, обидві — якщо хочеться перемикатися. Якщо вибраної моделі немає, Holos сам бере ту, що завантажено.
 
 Після запуску в рядку меню з'явиться іконка Holos і відкриються налаштування. Надайте два дозволи:
 
@@ -151,7 +153,7 @@ Whisper — модель розпізнавання, а не чат: інстр�
 
 ### Parakeet (експериментально)
 
-Другий рушій — NVIDIA Parakeet TDT 0.6B v3 у Core ML (розпізнавання на Neural Engine). Після завантаження модель з'являється в Налаштування → «Розпізнавання» → «Модель» поруч із whisper: вибір моделі Parakeet сам перемикає рушій.
+Другий рушій — NVIDIA Parakeet TDT 0.6B v3 у Core ML (розпізнавання на Neural Engine). Після завантаження модель з'являється в Налаштування → «Розпізнавання» → «Модель» поруч із whisper: вибір моделі Parakeet сам перемикає рушій. Якщо whisper не завантажено зовсім, Holos одразу запуститься на Parakeet.
 
 | Модель | Команда | Розмір | Примітка |
 |---|---|---|---|

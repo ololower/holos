@@ -35,8 +35,9 @@ codesign --force --sign "$IDENTITY" "$APP/Contents/Frameworks/whisper.framework"
 codesign --force --sign "$IDENTITY" "$APP"
 echo "Зібрано: $(pwd)/$APP"
 
-if ! ls "$HOME/Library/Application Support/Holos/models/"ggml-*.bin >/dev/null 2>&1; then
-    echo "Моделі розпізнавання ще немає — завантажте її: scripts/download-model.sh"
+MODELS="$HOME/Library/Application Support/Holos/models"
+if ! compgen -G "$MODELS/ggml-*.bin" >/dev/null && ! compgen -G "$MODELS/parakeet-*-coreml" >/dev/null; then
+    echo "Моделі розпізнавання ще немає — завантажте її: scripts/download-model.sh (Whisper) або scripts/download-model.sh parakeet-ultra (Parakeet)"
 fi
 
 if [[ "${1:-}" == "--install" ]]; then

@@ -155,6 +155,34 @@ final class Settings: ObservableObject {
         engine == .parakeet ? parakeetModelPath : modelPath
     }
 
+    /// Вибір моделі сам перемикає рушій
+    func use(_ path: String, engine: SpeechEngineKind) {
+        if engine == .parakeet {
+            parakeetModelPath = path
+        } else {
+            modelPath = path
+        }
+        self.engine = engine
+    }
+
+    /// Вибраної моделі на диску немає, а інша встановлена — беремо її: спершу того самого рушія.
+    /// Так працює будь-яка завантажена модель, наприклад лише Parakeet, хоча за замовчуванням стоїть whisper.
+    /// Повертає модель, на яку перемкнулися.
+    @discardableResult
+    func useInstalledModelIfMissing() -> InstalledModel? {
+        let path = activeModelPath
+        let exists = engine == .parakeet ? ParakeetEngine.isModelDirectory(path) : FileManager.default.fileExists(atPath: path)
+        guard !exists else { return nil }
+        let installed = InstalledModel.scan()
+        func best(_ kind: SpeechEngineKind) -> InstalledModel? {
+            let models = installed.filter { $0.engine == kind }
+            return models.first { [Settings.defaultModelPath, Settings.defaultParakeetModelPath].contains($0.path) } ?? models.first
+        }
+        guard let model = best(engine) ?? best(engine == .whisper ? .parakeet : .whisper) else { return nil }
+        use(model.path, engine: model.engine)
+        return model
+    }
+
     /// Підказка для whisper: імена, терміни, бажаний стиль
     @Published var prompt: String {
         didSet { defaults.set(prompt, forKey: "prompt") }
