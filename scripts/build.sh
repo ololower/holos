@@ -17,8 +17,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BIN_PATH/Holos" "$APP/Contents/MacOS/Holos"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-# Коміт, з якого зібрано, — видно в меню Holos («Версія …»)
+# Коміт, з якого зібрано, — видно в меню Holos («Версія …»). Номер збірки — кількість комітів:
+# завжди зростає. Версію (CFBundleShortVersionString) піднімають вручну в Resources/Info.plist
 /usr/libexec/PlistBuddy -c "Add :HolosCommit string $(git describe --always --dirty 2>/dev/null || echo невідомо)" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD 2>/dev/null || echo 1)" "$APP/Contents/Info.plist"
 cp Resources/ggml-silero-v6.2.0.bin Resources/AppIcon.icns "$APP/Contents/Resources/"
 cp -R Vendor/whisper.xcframework/macos-arm64_x86_64/whisper.framework "$APP/Contents/Frameworks/"
 

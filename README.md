@@ -285,6 +285,8 @@ open -n -W --stdout запис.txt build/Holos.app --args --record 3 [--micropho
 scripts/make-icon.sh
 ```
 
+**Версія.** Кожне оновлення застосунку піднімає мінорну версію — `CFBundleShortVersionString` у `Resources/Info.plist` (1.1 → 1.2 …), у тому ж коміті. Номер збірки `build.sh` ставить сам: кількість комітів.
+
 Оновити whisper.cpp: змініть `WHISPER_BUILD` і `WHISPER_SHA256` у `scripts/fetch-deps.sh` (SHA-256 вказано на сторінці релізу на GitHub) і запустіть скрипт знову.
 
 ## Відомі обмеження
