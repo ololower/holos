@@ -27,7 +27,7 @@
 - Mac на Apple Silicon (M1 і новіші)
 - macOS 14 або новіша
 - Xcode зі Swift 5.10 або новішим
-- Близько 1,5 ГБ вільного місця; інтернет — лише для першого завантаження залежностей і моделі
+- Близько 1,5 ГБ вільного місця (з рушієм Parakeet — ще 0,6 ГБ); інтернет — лише для першого завантаження залежностей і моделі
 
 Перевірено на macOS 27.0.1, M1 Max, Xcode 26.6. На старіших версіях macOS не перевірялося.
 
@@ -38,6 +38,7 @@ git clone https://github.com/ololower/holos.git Holos
 cd Holos
 scripts/fetch-deps.sh        # whisper.cpp і Silero VAD (58 МБ), з перевіркою SHA-256
 scripts/download-model.sh    # модель розпізнавання (1,1 ГБ)
+scripts/download-model.sh parakeet-ultra   # необов'язково: швидший рушій Parakeet (0,6 ГБ)
 scripts/setup-signing.sh     # рекомендовано: постійний локальний підпис, див. «Підпис і дозволи»
 scripts/build.sh --install   # збирає, копіює в /Applications і запускає
 ```
