@@ -64,9 +64,6 @@ final class Settings: ObservableObject {
             : modelsDirectory.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml").path
     }
 
-    /// Скільки мікрофон лишається відкритим після диктування, якщо ввімкнено keepMicrophoneWarm
-    static let warmMicrophoneSeconds = 10.0
-
     static var defaultModelPath: String {
         // Повна large-v3 помітно точніша для української, ніж turbo; turbo — удвічі швидша
         modelsDirectory.appendingPathComponent("ggml-large-v3-q5_0.bin").path
@@ -113,30 +110,18 @@ final class Settings: ObservableObject {
         didSet { defaults.set(handsFree, forKey: "handsFree") }
     }
 
-    // MARK: Експериментальне (див. ExperimentalPane): усе вимкнено за замовчуванням
-
-    /// Не закривати мікрофон одразу після диктування, щоб наступне почалося миттєво
-    @Published var keepMicrophoneWarm: Bool {
-        didSet { defaults.set(keepMicrophoneWarm, forKey: "keepMicrophoneWarm") }
-    }
-
     /// Після завантаження моделі розпізнати секунду тиші, щоб перше диктування не було повільнішим
     @Published var warmUpModel: Bool {
         didSet { defaults.set(warmUpModel, forKey: "experimentalWarmUp") }
     }
 
-    /// Жадібне декодування замість beam search для фраз, довших за Transcriber.greedyAfterSeconds
-    @Published var fastLongPhrases: Bool {
-        didSet { defaults.set(fastLongPhrases, forKey: "experimentalFastLongPhrases") }
-    }
-
-    /// Без повторних спроб розпізнавання з вищою «температурою»
+    /// Whisper: без повторних спроб розпізнавання з вищою «температурою»
     @Published var noFallback: Bool {
         didSet { defaults.set(noFallback, forKey: "experimentalNoFallback") }
     }
 
     var transcriberOptions: Transcriber.Options {
-        Transcriber.Options(fastLongPhrases: fastLongPhrases, noFallback: noFallback)
+        Transcriber.Options(noFallback: noFallback)
     }
 
     /// Заміни після розпізнавання (див. Replacements)
@@ -191,10 +176,10 @@ final class Settings: ObservableObject {
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
-        keepMicrophoneWarm = defaults.bool(forKey: "keepMicrophoneWarm")
         warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
-        fastLongPhrases = defaults.bool(forKey: "experimentalFastLongPhrases")
         noFallback = defaults.bool(forKey: "experimentalNoFallback")
+        // Налаштування, які прибрано
+        for key in ["keepMicrophoneWarm", "experimentalFastLongPhrases"] { defaults.removeObject(forKey: key) }
         if let data = defaults.data(forKey: "replacementRules"),
            let rules = try? JSONDecoder().decode([ReplacementRule].self, from: data) {
             replacementRules = rules

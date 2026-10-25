@@ -230,15 +230,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusItem()
     }
 
-    /// Скільки не закривати мікрофон після диктування
-    private var keepMicrophoneOpen: TimeInterval {
-        settings.keepMicrophoneWarm ? Settings.warmMicrophoneSeconds : 0
-    }
-
     private func cancelRecording() {
         guard phase == .recording else { return }
         maxDurationTimer?.invalidate()
-        recorder.stop(keepOpen: keepMicrophoneOpen) { _ in }
+        recorder.stop { _ in }
         phase = .idle
         overlay.hide()
     }
@@ -268,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Поки дописується хвіст і сесія віддає семпли, нового запису не починаємо
         phase = .transcribing
         DispatchQueue.main.asyncAfter(deadline: .now() + recordingTail) { [self] in
-            recorder.stop(keepOpen: keepMicrophoneOpen) { [weak self] samples in
+            recorder.stop { [weak self] samples in
                 self?.transcribe(samples, duration: duration)
             }
         }

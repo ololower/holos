@@ -8,7 +8,7 @@ if Watchdog.isWatchdogProcess {
 
 // Режим перевірки без інтерфейсу:
 // Holos --transcribe <аудіофайл> [--engine whisper|parakeet] [--model <шлях>] [--prompt <підказка>]
-//       [--language <код|auto>] [--warmup] [--fast-long] [--no-fallback]   — експериментальні параметри
+//       [--language <код|auto>] [--warmup] [--no-fallback]
 if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < CommandLine.arguments.count {
     func option(_ name: String) -> String? {
         guard let j = CommandLine.arguments.firstIndex(of: name), j + 1 < CommandLine.arguments.count else { return nil }
@@ -21,8 +21,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < Command
                       modelPath: option("--model") ?? (engine == .parakeet ? Settings.defaultParakeetModelPath : Settings.defaultModelPath),
                       prompt: option("--prompt") ?? "",
                       language: option("--language") ?? DictationLanguage.defaultCode,
-                      options: Transcriber.Options(fastLongPhrases: flags.contains("--fast-long"),
-                                                   noFallback: flags.contains("--no-fallback")),
+                      options: Transcriber.Options(noFallback: flags.contains("--no-fallback")),
                       warmUp: flags.contains("--warmup")))
 }
 

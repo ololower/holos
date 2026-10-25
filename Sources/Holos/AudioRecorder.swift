@@ -51,11 +51,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     /// Лише в bufferQueue: на випадок, якщо сесія віддасть не той формат, який просили
     private var converter: AVAudioConverter?
 
-    // Лише в sessionQueue
-    private var attachedUID: String?
-    /// Відкладене закриття мікрофона, коли його тримаємо відкритим між диктуваннями
-    private var pendingClose: DispatchWorkItem?
-
     // Лише в головному потоці
     private var generation = 0
     private var isRecording = false
@@ -92,8 +87,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         isRecording = true
         let generation = generation
         sessionQueue.async { [self] in
-            pendingClose?.cancel()
-            pendingClose = nil
             // Тут, а не в головному потоці: попередній stop() у цій черзі має встигнути забрати свої семпли
             lock.withLock {
                 samples.removeAll(keepingCapacity: true)
@@ -106,13 +99,9 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                     Log.audio.notice("Вибраний мікрофон від'єднаний, беру «\(device.name, privacy: .public)»")
                 }
                 setGain(decibels: gains[device.uid] ?? 0)
-                // Мікрофон уже відкритий з минулого диктування — просто збираємо звук
-                if !(session.isRunning && attachedUID == device.uid) {
-                    if session.isRunning { session.stopRunning() }
-                    try attachDevice(device)
-                    session.startRunning()
-                    Log.audio.info("Мікрофон «\(device.name, privacy: .public)» відкрито")
-                }
+                try attachDevice(device)
+                session.startRunning()
+                Log.audio.info("Мікрофон «\(device.name, privacy: .public)» відкрито")
             } catch {
                 DispatchQueue.main.async { self.fail(error.localizedDescription, generation: generation) }
                 return
@@ -124,30 +113,19 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         }
     }
 
-    /// Зупиняє запис і віддає записані семпли в головний потік. `keepOpen` — скільки секунд не закривати
-    /// мікрофон, щоб наступне диктування почалося миттєво; звук за цей час нікуди не йде.
-    func stop(keepOpen: TimeInterval = 0, _ completion: @escaping ([Float]) -> Void) {
+    /// Зупиняє запис і віддає записані семпли в головний потік
+    func stop(_ completion: @escaping ([Float]) -> Void) {
         isRecording = false
         sessionQueue.async { [self] in
-            if keepOpen <= 0 { session.stopRunning() }
+            session.stopRunning()
             bufferQueue.sync {} // порції, які вже в дорозі
             let result = lock.withLock {
                 isCollecting = false
                 defer { samples = [] }
                 return samples
             }
+            detachDevice()
             DispatchQueue.main.async { completion(result) }
-            if keepOpen <= 0 {
-                detachDevice()
-                return
-            }
-            let close = DispatchWorkItem { [self] in
-                session.stopRunning()
-                detachDevice()
-                Log.audio.info("Мікрофон закрито після паузи")
-            }
-            pendingClose = close
-            sessionQueue.asyncAfter(deadline: .now() + keepOpen, execute: close)
         }
     }
 
@@ -169,10 +147,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.inputs.forEach(session.removeInput)
-        attachedUID = nil
         guard session.canAddInput(input) else { throw RecorderError.cannotOpen(device.name) }
         session.addInput(input)
-        attachedUID = device.uid
     }
 
     /// Лише в sessionQueue. Між записами мікрофон не тримаємо.
@@ -180,7 +156,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         session.beginConfiguration()
         session.inputs.forEach(session.removeInput)
         session.commitConfiguration()
-        attachedUID = nil
     }
 
     /// Можна міняти й під час запису — так повзунок у налаштуваннях діє одразу
@@ -190,7 +165,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // Між диктуваннями (мікрофон тримаємо відкритим) звук навіть не обробляємо
+        // Порції, що прийшли вже після stop(), не обробляємо
         guard lock.withLock({ isCollecting }) else { return }
         var chunk = convert(sampleBuffer)
         let gain = lock.withLock { self.gain }

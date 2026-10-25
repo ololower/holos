@@ -5,7 +5,7 @@ import SwiftUI
 /// вікно підлаштовує висоту під вкладку
 final class SettingsWindowController: NSWindowController {
     enum Tab: Int, CaseIterable {
-        case general, microphone, recognition, replacements, experimental
+        case general, microphone, recognition, replacements
     }
 
     private let tabs = SettingsTabViewController()
@@ -51,7 +51,6 @@ private final class SettingsTabViewController: NSTabViewController {
         addPane("Мікрофон", symbol: "mic", MicrophonePane())
         addPane("Розпізнавання", symbol: "waveform", RecognitionPane())
         addPane("Заміни", symbol: "arrow.triangle.swap", ReplacementsPane())
-        addPane("Експериментальне", symbol: "flask", ExperimentalPane())
     }
 
     @available(*, unavailable)
@@ -69,9 +68,21 @@ private final class SettingsTabViewController: NSTabViewController {
 
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         super.tabView(tabView, didSelect: tabViewItem)
-        guard let window = view.window, let size = tabViewItem?.viewController?.preferredContentSize, size != .zero else { return }
+        fitWindow(to: tabViewItem?.viewController)
+    }
+
+    /// Вкладка змінила висоту без перемикання (з'явилися дозволи, вибрано інший рушій)
+    override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        super.preferredContentSizeDidChange(for: viewController)
+        guard viewController === tabViewItems[selectedTabViewItemIndex].viewController else { return }
+        fitWindow(to: viewController)
+    }
+
+    private func fitWindow(to controller: NSViewController?) {
+        guard let window = view.window, let size = controller?.preferredContentSize, size != .zero else { return }
         // Верхній край лишається на місці, як у системних налаштуваннях
         let content = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+        guard content.size != window.frame.size else { return }
         var frame = window.frame
         frame.origin.y += frame.height - content.height
         frame.size = content.size

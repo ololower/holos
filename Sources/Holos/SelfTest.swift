@@ -110,6 +110,9 @@ enum SelfTest {
     static func renderSettings(to directory: String) -> Int32 {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
+        // Звичайний стан після встановлення: дозволи надано (у тестового процесу їх немає)
+        AppStatus.shared.microphoneAllowed = true
+        AppStatus.shared.accessibilityAllowed = true
         let controller = SettingsWindowController()
         guard let window = controller.window else { return 1 }
         for tab in SettingsWindowController.Tab.allCases {

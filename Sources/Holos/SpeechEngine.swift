@@ -11,17 +11,9 @@ protocol SpeechEngine: AnyObject {
     func transcribe(_ input: [Float], prompt: String, language: String, options: Transcriber.Options) -> String
 }
 
-enum SpeechEngineKind: String, CaseIterable, Identifiable {
+/// Рушій вибирається разом із моделлю (InstalledModel) — окремого перемикача немає
+enum SpeechEngineKind: String {
     case whisper, parakeet
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .whisper: return "Whisper"
-        case .parakeet: return "Parakeet (експериментально)"
-        }
-    }
 }
 
 extension Transcriber: SpeechEngine {}

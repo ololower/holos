@@ -19,16 +19,11 @@ final class Transcriber {
     static let beamSize = 5
     static let vadPaddingMs = 200
     static let vadModelName = "Silero VAD v6.2.0"
-    /// Довші фрази з Options.fastLongPhrases декодуються жадібно
-    static let greedyAfterSeconds = 8.0
     /// Скільки разів whisper за замовчуванням повторює розпізнавання з вищою «температурою» (0,2 … 1,0)
     static let fallbackRetries = 5
 
-    /// Експериментальні параметри (див. ExperimentalPane)
+    /// Додаткові параметри (вкладка «Розпізнавання» → «Швидкість»)
     struct Options {
-        /// Жадібне декодування замість beam search для фраз, довших за greedyAfterSeconds:
-        /// на 14-секундній фразі на чверть швидше, але на нечіткому мовленні beam search буває точнішим
-        var fastLongPhrases = false
         /// Без повторних спроб: відповідь завжди швидка, але на поганому звуці текст може бути гіршим
         var noFallback = false
     }
@@ -107,8 +102,7 @@ final class Transcriber {
         let minimum = Int(AudioRecorder.sampleRate * 1.0)
         if samples.count < minimum { samples += [Float](repeating: 0, count: minimum - samples.count) }
 
-        let greedy = options.fastLongPhrases && Double(input.count) / AudioRecorder.sampleRate > Self.greedyAfterSeconds
-        var params = whisper_full_default_params(greedy ? WHISPER_SAMPLING_GREEDY : WHISPER_SAMPLING_BEAM_SEARCH)
+        var params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH)
         params.beam_search.beam_size = Int32(Self.beamSize)
         if options.noFallback {
             // Лише одна спроба з температурою 0

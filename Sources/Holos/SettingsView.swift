@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 // Вкладки вікна налаштувань (див. SettingsWindowController). Кожна — звичайна згрупована форма,
 // як у Системних параметрах: пояснення — у підписах під розділами й під перемикачами.
+// Показуємо лише те, що стосується вибраного: дозволи — коли їх бракує, налаштування whisper — коли вибрано whisper.
 
 private let paneWidth: CGFloat = 520
 
@@ -101,18 +102,20 @@ struct GeneralPane: View {
 
     var body: some View {
         Form {
-            Section {
-                permissionRow("Мікрофон", allowed: status.microphoneAllowed) {
-                    Permissions.requestMicrophone { _ in }
+            if needsPermissions {
+                Section {
+                    permissionRow("Мікрофон", allowed: status.microphoneAllowed) {
+                        Permissions.requestMicrophone { _ in }
+                    }
+                    permissionRow("Універсальний доступ", allowed: status.accessibilityAllowed) {
+                        Permissions.requestAccessibility()
+                        Permissions.openSettings("Privacy_Accessibility")
+                    }
+                } header: {
+                    Text("Потрібні дозволи")
+                } footer: {
+                    Footnote("Універсальний доступ — щоб чути клавішу в будь-якій програмі й вставляти текст.")
                 }
-                permissionRow("Універсальний доступ", allowed: status.accessibilityAllowed) {
-                    Permissions.requestAccessibility()
-                    Permissions.openSettings("Privacy_Accessibility")
-                }
-            } header: {
-                Text("Дозволи")
-            } footer: {
-                Footnote("Універсальний доступ потрібен, щоб чути клавішу в будь-якій програмі та вставляти текст.")
             }
 
             Section {
@@ -120,7 +123,7 @@ struct GeneralPane: View {
                     ForEach(TriggerKey.allCases) { Text($0.title).tag($0) }
                 }
                 DescribedToggle(title: "Запис без утримання",
-                                description: "Двічі коротко натиснути клавішу — і говорити до 3 хв. Ще одне натискання вставляє текст, Esc скасовує.",
+                                description: "Двічі натисніть клавішу й говоріть; ще раз — вставити, Esc — скасувати.",
                                 isOn: $settings.handsFree)
                 Picker("Мова", selection: $settings.language) {
                     Text("Автовизначення").tag(DictationLanguage.auto)
@@ -135,12 +138,11 @@ struct GeneralPane: View {
                 Text("Диктування")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Footnote("Тримайте клавішу, говоріть, відпустіть — текст з’явиться там, де стоїть курсор. Будь-яка інша клавіша під час утримання скасовує запис.")
                     if settings.triggerKey == .fn {
                         Footnote("Для fn у Системних параметрах → Клавіатура встановіть «Натискання 🌐» на «Нічого не робити».", warning: true)
                     }
                     if settings.language == DictationLanguage.auto {
-                        Footnote("Автовизначення на коротких фразах може помилитися — наприклад, сприйняти українську як російську. Якщо диктуєте однією мовою, краще вибрати її явно.", warning: true)
+                        Footnote("На коротких фразах автовизначення може сплутати українську з російською — краще вибрати мову явно.", warning: true)
                     }
                 }
             }
@@ -149,23 +151,26 @@ struct GeneralPane: View {
                 Toggle("Запускати під час входу в систему", isOn: $launchAtLogin)
                     .toggleStyle(.switch)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-                DescribedToggle(title: "Перезапускати після збою",
-                                description: "Якщо Holos аварійно завершиться, він запуститься знову за кілька секунд. Звичайний вихід через меню перезапуску не викликає.",
-                                isOn: $settings.restartAfterCrash)
+                Toggle("Перезапускати після збою", isOn: $settings.restartAfterCrash)
+                    .toggleStyle(.switch)
                     .onChange(of: settings.restartAfterCrash) { _, enabled in Watchdog.sync(enabled: enabled) }
             } header: {
                 Text("Запуск")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     if settings.restartAfterCrash && !Watchdog.isInstalledCopy {
-                        Footnote("Перезапуск працює лише для копії в /Applications (scripts/build.sh --install).", warning: true)
+                        Footnote("Перезапуск працює лише для копії в /Applications.", warning: true)
                     }
-                    Footnote("Holos \(AppDelegate.version). Працює повністю офлайн: аудіо обробляється в пам’яті й нікуди не надсилається та не зберігається.")
+                    Footnote("Holos \(AppDelegate.version) · працює офлайн: аудіо лише в пам’яті й нікуди не надсилається.")
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 660)
+        .frame(width: paneWidth, height: needsPermissions ? 560 : 420)
+    }
+
+    private var needsPermissions: Bool {
+        !status.microphoneAllowed || !status.accessibilityAllowed
     }
 
     private func permissionRow(_ title: String, allowed: Bool, request: @escaping () -> Void) -> some View {
@@ -199,7 +204,6 @@ struct MicrophonePane: View {
     @State private var microphones: [AudioInputDevice] = []
     @State private var automatic: AudioInputDevice?
     @State private var current: AudioInputDevice?
-    @State private var lidClosed = false
     @StateObject private var tester = MicrophoneTester()
 
     var body: some View {
@@ -215,7 +219,7 @@ struct MicrophonePane: View {
                     }
                 }
             } footer: {
-                Footnote("Вибраний мікрофон береться завжди, коли під’єднаний, — навіть Bluetooth. «Автоматично» і коли вибраний від’єднано: спершу дротовий, Bluetooth — в останню чергу, бо з ним навушники перемикаються в режим гарнітури й звучать гірше.")
+                Footnote("«Автоматично» і коли вибраний від’єднано: спершу дротовий мікрофон, Bluetooth — в останню чергу.")
             }
 
             Section {
@@ -248,29 +252,13 @@ struct MicrophonePane: View {
                         .foregroundStyle(verdict.isProblem ? .orange : .green)
                 }
             } header: {
-                Text(current.map { "Гучність «\($0.name)» у Holos" } ?? "Гучність у Holos")
+                Text("Гучність у Holos")
             } footer: {
                 Footnote(gainFootnote)
             }
-
-            Section {
-                ForEach(microphones) { device in
-                    LabeledContent {
-                        if device.id == current?.id {
-                            Label("Буде використано", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    } label: {
-                        Text(device.name)
-                        Text(description(of: device))
-                    }
-                }
-            } header: {
-                Text("Під’єднані мікрофони")
-            }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 640)
+        .frame(width: paneWidth, height: 340)
         .onAppear(perform: refresh)
         .onDisappear { tester.stop() }
         .onChange(of: settings.microphoneUID) { _, _ in
@@ -294,12 +282,12 @@ struct MicrophonePane: View {
     }
 
     private var gainFootnote: String {
-        var text = "Діє лише в Holos і лише для цього мікрофона: звук підсилюється чи приглушується вже після запису, тож системна гучність"
-        if let device = current, let volume = AudioDevices.inputVolume(of: device) {
-            text += " (зараз \(Int((volume * 100).rounded())) %)"
+        guard let device = current else { return "Мікрофона немає." }
+        var text = "Лише для Holos і «\(device.name)»; системна гучність"
+        if let volume = AudioDevices.inputVolume(of: device) {
+            text += " (\(Int((volume * 100).rounded())) %)"
         }
-        text += " та інші програми не змінюються. Натисніть «Перевірити» й кілька секунд говоріть, як під час диктування."
-        return text
+        return text + " не змінюється."
     }
 
     private func toggleTest() {
@@ -322,22 +310,6 @@ struct MicrophonePane: View {
         microphones = AudioDevices.inputs()
         automatic = AudioDevices.resolve(preferredUID: "")
         current = AudioDevices.resolve(preferredUID: settings.microphoneUID)
-        lidClosed = AudioDevices.isLidClosed
-    }
-
-    private func description(of device: AudioInputDevice) -> String {
-        let kind: String
-        if device.isBuiltIn && lidClosed {
-            kind = "Вбудований — кришка закрита, автоматично не береться"
-        } else {
-            switch device.kind {
-            case .wired: kind = device.isBuiltIn ? "Вбудований" : "Дротовий"
-            case .wireless: kind = "Бездротовий (Bluetooth, iPhone) — автоматично в останню чергу"
-            case .virtual: kind = "Віртуальний — лише якщо вибрати явно"
-            }
-        }
-        let gain = settings.gain(for: device.uid)
-        return gain == 0 ? kind : "\(kind) · у Holos \(Self.format(decibels: gain))"
     }
 }
 
@@ -373,45 +345,51 @@ struct RecognitionPane: View {
                 }
                 LabeledContent("Стан") { modelStatus }
             } footer: {
-                Footnote("Список — моделі з ~/Library/Application Support/Holos/models. Завантажити ще: scripts/download-model.sh turbo, parakeet-ultra чи parakeet-v3. Parakeet — експериментальний рушій: у 10–14 разів швидший, але підказки не використовує (див. «Експериментальне»).")
+                Footnote(isParakeet
+                         ? "Parakeet — експериментальний: у ~10 разів швидший, мову визначає сам, підказок не використовує."
+                         : "Ще моделі: scripts/download-model.sh turbo чи parakeet-ultra.")
+            }
+
+            if !isParakeet {
+                Section {
+                    TextArea(text: $settings.prompt, placeholder: "Імена й терміни, які треба писати саме так", height: 54)
+                } header: {
+                    Text("Підказка")
+                } footer: {
+                    Footnote("Слова в потрібному написанні, з великої літери й крапкою в кінці — модель копіює і стиль.")
+                }
             }
 
             Section {
-                TextArea(text: $settings.prompt, placeholder: "Імена й терміни, які треба писати саме так", height: 54)
-            } header: {
-                Text("Підказка")
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    if isParakeet {
-                        Footnote("Parakeet підказку не використовує — для нього працюють лише заміни.", warning: true)
-                    }
-                    Footnote("Слова в потрібному написанні, наприклад «Олексій, Kubernetes, PhpStorm, пулреквест.» Модель сприймає підказку як попередню репліку й копіює з неї написання, регістр і розділові знаки: підказка з малої літери дає речення з малої. Тож пишіть із великої й ставте крапку в кінці, тією мовою, якою диктуєте.")
+                DescribedToggle(title: "Прогрівати модель після запуску",
+                                description: "Перше диктування після оновлення чи перезавантаження Mac не чекає на підготовку моделі.",
+                                isOn: $settings.warmUpModel)
+                if !isParakeet {
+                    DescribedToggle(title: "Без повторних спроб",
+                                    description: "Відповідь завжди швидка, але на поганому звуці текст може бути гіршим.",
+                                    isOn: $settings.noFallback)
                 }
+            } header: {
+                Text("Швидкість")
             }
 
             Section {
                 DisclosureGroup("Що саме отримує модель") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(isParakeet
-                             ? "Parakeet отримує лише звук: підказок і інструкцій він не приймає."
-                             : "Whisper — модель розпізнавання, а не чат: інструкцій вона не виконує, прихованого системного промпту немає. Єдиний текст, який вона отримує, — ваша підказка.")
-                            .foregroundStyle(.secondary)
-                        Text(modelInputDescription)
-                            .font(.system(.callout, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                    .padding(.vertical, 4)
+                    Text(modelInputDescription)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(.vertical, 4)
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 640)
+        .frame(width: paneWidth, height: isParakeet ? 380 : 580)
         .onAppear { models = InstalledModel.scan() }
     }
 
     private var isParakeet: Bool { settings.engine == .parakeet }
 
-    /// Вибір моделі Parakeet сам перемикає рушій, і навпаки
+    /// Вибір моделі сам перемикає рушій: окремого перемикача рушія немає
     private var modelSelection: Binding<String> {
         Binding(
             get: { settings.activeModelPath },
@@ -431,7 +409,7 @@ struct RecognitionPane: View {
         settings.engine = engine
     }
 
-    /// Збирається з тих самих констант, які використовує Transcriber
+    /// Збирається з тих самих констант, які використовує рушій
     private var modelInputDescription: String {
         if isParakeet { return parakeetInputDescription }
         let prompt = settings.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -443,24 +421,19 @@ struct RecognitionPane: View {
             : "\(settings.language) (\(DictationLanguage.name(for: settings.language).lowercased()), автовизначення вимкнено)"
         let indent = String(repeating: " ", count: 16)
         let filtered = Transcriber.hallucinations.sorted().map { "\(indent)«\($0)»" }.joined(separator: "\n")
-        let greedy = settings.fastLongPhrases
-            ? "\n\(indent)жадібне для фраз, довших за \(Int(Transcriber.greedyAfterSeconds)) с (експериментально)"
-            : ""
-        let retries = settings.noFallback
-            ? "вимкнено (експериментально)"
-            : "до \(Transcriber.fallbackRetries), з вищою «температурою»"
+        let retries = settings.noFallback ? "вимкнено" : "до \(Transcriber.fallbackRetries), з вищою «температурою»"
         return """
         аудіо           16 кГц, моно, лише з пам'яті
         language        \(language)
         initial_prompt  \(prompt.isEmpty ? "немає" : "«\(prompt)»")
-        декодування     beam search, ширина \(Transcriber.beamSize)\(greedy)
+        декодування     beam search, ширина \(Transcriber.beamSize)
         повтори         \(retries)
         контекст        кожен запис окремо, без попередніх
         VAD             \(vad)
         фільтр          відкидає результат, якщо це лише:
         \(filtered)
                         або згадка Amara.org
-        після моделі    заміни: \(settings.replacements.rules.count) правил (вкладка «Заміни»)
+        після моделі    заміни: \(settings.replacements.rules.count) правил
         """
     }
 
@@ -479,7 +452,7 @@ struct RecognitionPane: View {
         підказка        не використовується
         декодування     TDT, жадібне
         VAD             немає (тишу відсікає Holos до розпізнавання)
-        після моделі    заміни: \(settings.replacements.rules.count) правил (вкладка «Заміни»)
+        після моделі    заміни: \(settings.replacements.rules.count) правил
         """
     }
 
@@ -549,31 +522,23 @@ struct ReplacementsPane: View {
                         .help("Видалити вибрані")
                         .disabled(selection.isEmpty)
                     Spacer()
-                    Text("Діє правил: \(settings.replacements.rules.count)")
-                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-            } header: {
-                Text("Заміни після розпізнавання")
             } footer: {
-                Footnote("Як це працює: модель розпізнає мовлення як уміє, а Holos потім шукає в готовому тексті фрази з лівої колонки й ставить замість них праву. Сама модель про заміни не знає — на відміну від підказки. Регістр не важить, замінюється лише ціле слово чи фраза: «кубер» не зачепить «кубернетис». Порожня права колонка прибирає фразу разом із зайвими комами.")
+                Footnote("Holos замінює ці фрази в уже розпізнаному тексті. Регістр не важить, лише цілі слова; порожнє «Замінити на» прибирає фразу.")
             }
 
             Section {
-                TextField("Фраза", text: $sample, prompt: Text("відкрий пі ейч пі шторм"))
-                LabeledContent("Вставиться") {
-                    Text(sample.isEmpty ? "—" : preview)
-                        .foregroundStyle(sample.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
+                TextField("Перевірити", text: $sample, prompt: Text("відкрий пі ейч пі шторм"))
+                if !sample.isEmpty {
+                    LabeledContent("Вставиться") {
+                        Text(preview).textSelection(.enabled)
+                    }
                 }
-            } header: {
-                Text("Перевірка")
-            } footer: {
-                Footnote("Напишіть фразу так, як її розпізнала модель, — побачите, що з неї зроблять заміни. Розпізнавання тут не запускається.")
             }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: 600)
+        .frame(width: paneWidth, height: 410)
     }
 
     private var preview: String {
@@ -602,66 +567,4 @@ struct ReplacementsPane: View {
             }
         )
     }
-}
-
-// MARK: - Експериментальне
-
-struct ExperimentalPane: View {
-    @ObservedObject private var settings = Settings.shared
-
-    var body: some View {
-        Form {
-            Section {
-                DescribedToggle(title: "Прогрівати модель після запуску",
-                                description: "Після оновлення Holos чи перезавантаження Mac перше розпізнавання буває повільнішим на 0,2–0,8 с, поки Metal готує шейдери. З прогрівом це стається одразу після запуску (секунда роботи відеоядра), а не на першому диктуванні. В інших випадках різниці немає. Діє з наступного запуску.",
-                                isOn: $settings.warmUpModel)
-                DescribedToggle(title: "Тримати мікрофон відкритим \(Int(Settings.warmMicrophoneSeconds)) с після диктування",
-                                description: "Наступне диктування починається без ~0,2 с на відкриття мікрофона. Поки він відкритий, світиться помаранчевий індикатор; звук не обробляється. З Bluetooth-мікрофоном навушники довше лишаються в режимі гарнітури.",
-                                isOn: $settings.keepMicrophoneWarm)
-            } header: {
-                Label("Безпечно — на якість не впливає", systemImage: "checkmark.shield.fill")
-                    .foregroundStyle(.green)
-            }
-
-            Section {
-                Picker("Рушій", selection: $settings.engine) {
-                    ForEach(SpeechEngineKind.allCases) { Text($0.title).tag($0) }
-                }
-            } header: {
-                Label("Рушій розпізнавання — може вплинути на якість", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Footnote("Parakeet (NVIDIA, 25 європейських мов) розпізнає в 10–14 разів швидше за whisper: фраза в 14 с — 0,17 с замість 2,4 с. Мову визначає сам, тож на коротких фразах може з’їхати в російську — для української Holos схиляє його до українських варіантів, але не завжди встигає. Підказки не використовує, заміни працюють. Перший запуск — до 20 с: macOS готує модель для Neural Engine.")
-                    if isParakeet && !ParakeetEngine.isModelDirectory(settings.parakeetModelPath) {
-                        Footnote("Модель не завантажено. У теці проєкту: scripts/download-model.sh parakeet-ultra", warning: true)
-                    }
-                }
-            }
-
-            Section {
-                DescribedToggle(title: "Швидше розпізнавати довгі фрази",
-                                description: "Для фраз, довших за \(Int(Transcriber.greedyAfterSeconds)) с, — жадібне декодування замість beam search: на 14-секундній фразі на 15–25 % швидше, текст у тесті той самий. На нечіткому мовленні beam search іноді знаходить кращий варіант. Короткі фрази не змінюються.",
-                                isOn: $settings.fastLongPhrases)
-                DescribedToggle(title: "Без повторних спроб розпізнавання",
-                                description: "Коли результат виглядає ненадійним, whisper розпізнає фразу ще до \(Transcriber.fallbackRetries) разів — це може бути зависанням на кілька секунд, а без повторів відповідь завжди швидка. У тестах повтори не знадобилися жодного разу, навіть на зашумленому звуці, тож це радше страховка від рідкісних випадків. Там, де повтор допоміг би, текст буде гіршим.",
-                                isOn: $settings.noFallback)
-            } header: {
-                Label("Whisper — може вплинути на якість", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    if isParakeet {
-                        Footnote("Ці два налаштування — лише для whisper.", warning: true)
-                    }
-                    Footnote("Заміри — на M1 Max із моделлю large-v3 і синтетичним голосом; на живому голосі різниця може бути іншою. Що саме змінюється для моделі, видно на вкладці «Розпізнавання» → «Що саме отримує модель».")
-                }
-            }
-            .disabled(isParakeet)
-        }
-        .formStyle(.grouped)
-        .frame(width: paneWidth, height: 680)
-    }
-
-    private var isParakeet: Bool { settings.engine == .parakeet }
 }
