@@ -214,6 +214,41 @@ final class Settings: ObservableObject {
     }
 }
 
+/// Модель розпізнавання на диску — для списку на вкладці «Розпізнавання»
+struct InstalledModel: Identifiable, Hashable {
+    let path: String
+    let engine: SpeechEngineKind
+    let title: String
+
+    var id: String { path }
+
+    /// Файли ggml-*.bin (whisper) і теки Core ML (Parakeet) у теці моделей; недокачані (.part) пропускаються
+    static func scan() -> [InstalledModel] {
+        let directory = Settings.modelsDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.sorted().compactMap { name in
+            let path = directory.appendingPathComponent(name).path
+            if name.hasPrefix("ggml-") && name.hasSuffix(".bin") {
+                return InstalledModel(path: path, engine: .whisper, title: title(for: name))
+            }
+            if !name.hasSuffix(".part") && ParakeetEngine.isModelDirectory(path) {
+                return InstalledModel(path: path, engine: .parakeet, title: title(for: name))
+            }
+            return nil
+        }
+    }
+
+    static func title(for name: String) -> String {
+        switch name {
+        case "ggml-large-v3-q5_0.bin": return "Whisper large-v3"
+        case "ggml-large-v3-turbo-q8_0.bin": return "Whisper large-v3 turbo"
+        case "parakeet-ultra-coreml": return "Parakeet ultra"
+        case "parakeet-tdt-0.6b-v3-coreml": return "Parakeet v3"
+        default: return name
+        }
+    }
+}
+
 enum ModelState: Equatable {
     case loading
     case ready(loadSeconds: Double)

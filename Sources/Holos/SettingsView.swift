@@ -346,26 +346,34 @@ struct MicrophonePane: View {
 struct RecognitionPane: View {
     @ObservedObject private var settings = Settings.shared
     @ObservedObject private var status = AppStatus.shared
+    @State private var models: [InstalledModel] = []
 
     var body: some View {
         Form {
             Section {
-                LabeledContent(isParakeet ? "Тека" : "Файл") {
+                LabeledContent("Модель") {
                     HStack {
-                        Text((settings.activeModelPath as NSString).lastPathComponent)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(settings.activeModelPath)
-                        Button("Вибрати…", action: chooseModel)
+                        Picker("Модель", selection: modelSelection) {
+                            Section("Whisper") {
+                                ForEach(models.filter { $0.engine == .whisper }) { Text($0.title).tag($0.path) }
+                            }
+                            Section("Parakeet — експериментально") {
+                                ForEach(models.filter { $0.engine == .parakeet }) { Text($0.title).tag($0.path) }
+                            }
+                            // Модель з іншого місця, вибрана через «Інша…»
+                            if !models.contains(where: { $0.path == settings.activeModelPath }) {
+                                Text((settings.activeModelPath as NSString).lastPathComponent).tag(settings.activeModelPath)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        Button("Інша…", action: chooseModel)
+                            .help("Файл ggml-*.bin (whisper) або тека моделі Parakeet з іншого місця")
                     }
                 }
                 LabeledContent("Стан") { modelStatus }
-            } header: {
-                Text(isParakeet ? "Модель Parakeet (експериментально)" : "Модель whisper")
             } footer: {
-                if isParakeet {
-                    Footnote("Рушій змінюється на вкладці «Експериментальне».")
-                }
+                Footnote("Список — моделі з ~/Library/Application Support/Holos/models. Завантажити ще: scripts/download-model.sh turbo, parakeet-ultra чи parakeet-v3. Parakeet — експериментальний рушій: у 10–14 разів швидший, але підказки не використовує (див. «Експериментальне»).")
             }
 
             Section {
@@ -398,9 +406,30 @@ struct RecognitionPane: View {
         }
         .formStyle(.grouped)
         .frame(width: paneWidth, height: 640)
+        .onAppear { models = InstalledModel.scan() }
     }
 
     private var isParakeet: Bool { settings.engine == .parakeet }
+
+    /// Вибір моделі Parakeet сам перемикає рушій, і навпаки
+    private var modelSelection: Binding<String> {
+        Binding(
+            get: { settings.activeModelPath },
+            set: { path in
+                guard let model = models.first(where: { $0.path == path }) else { return }
+                use(model.path, engine: model.engine)
+            }
+        )
+    }
+
+    private func use(_ path: String, engine: SpeechEngineKind) {
+        if engine == .parakeet {
+            settings.parakeetModelPath = path
+        } else {
+            settings.modelPath = path
+        }
+        settings.engine = engine
+    }
 
     /// Збирається з тих самих констант, які використовує Transcriber
     private var modelInputDescription: String {
@@ -471,23 +500,19 @@ struct RecognitionPane: View {
 
     private func chooseModel() {
         let panel = NSOpenPanel()
+        panel.title = "Виберіть файл ggml-*.bin (whisper) або теку моделі Parakeet"
         panel.directoryURL = Settings.modelsDirectory
         panel.allowsMultipleSelection = false
-        if isParakeet {
-            panel.title = "Виберіть теку моделі Parakeet (parakeet-ultra-coreml чи parakeet-tdt-0.6b-v3-coreml)"
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-        } else {
-            panel.title = "Виберіть модель whisper (ggml-*.bin)"
-            panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data]
-            panel.canChooseDirectories = false
-        }
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "bin") ?? .data, .folder]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if isParakeet {
-            settings.parakeetModelPath = url.path
-        } else {
-            settings.modelPath = url.path
+        if ParakeetEngine.isModelDirectory(url.path) {
+            use(url.path, engine: .parakeet)
+        } else if url.pathExtension == "bin" {
+            use(url.path, engine: .whisper)
         }
+        models = InstalledModel.scan()
     }
 }
 
@@ -608,7 +633,7 @@ struct ExperimentalPane: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     Footnote("Parakeet (NVIDIA, 25 європейських мов) розпізнає в 10–14 разів швидше за whisper: фраза в 14 с — 0,17 с замість 2,4 с. Мову визначає сам, тож на коротких фразах може з’їхати в російську — для української Holos схиляє його до українських варіантів, але не завжди встигає. Підказки не використовує, заміни працюють. Перший запуск — до 20 с: macOS готує модель для Neural Engine.")
-                    if isParakeet && !parakeetModelInstalled {
+                    if isParakeet && !ParakeetEngine.isModelDirectory(settings.parakeetModelPath) {
                         Footnote("Модель не завантажено. У теці проєкту: scripts/download-model.sh parakeet-ultra", warning: true)
                     }
                 }
@@ -639,10 +664,4 @@ struct ExperimentalPane: View {
     }
 
     private var isParakeet: Bool { settings.engine == .parakeet }
-
-    private var parakeetModelInstalled: Bool {
-        ParakeetEngine.requiredFiles.allSatisfy {
-            FileManager.default.fileExists(atPath: (settings.parakeetModelPath as NSString).appendingPathComponent($0))
-        }
-    }
 }

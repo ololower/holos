@@ -37,6 +37,11 @@ final class ParakeetEngine: SpeechEngine {
     static let requiredFiles = ["Preprocessor.mlmodelc", "Encoder.mlmodelc", "Decoder.mlmodelc",
                                 "JointDecisionv3.mlmodelc", "parakeet_vocab.json"]
 
+    /// Тека містить усе потрібне для рушія
+    static func isModelDirectory(_ path: String) -> Bool {
+        requiredFiles.allSatisfy { FileManager.default.fileExists(atPath: (path as NSString).appendingPathComponent($0)) }
+    }
+
     private var preprocessor: MLModel?
     private var encoder: MLModel?
     private var decoder: MLModel?
