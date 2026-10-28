@@ -350,16 +350,13 @@ struct RecognitionPane: View {
                          : "Ще моделі: scripts/download-model.sh turbo чи parakeet-ultra.")
             }
 
-            // Parakeet підказки не бере, а модель ШІ — бере
-            if !isParakeet || settings.correctionEnabled {
+            if !isParakeet {
                 Section {
                     TextArea(text: $settings.prompt, placeholder: "Імена й терміни, які треба писати саме так", height: 54)
                 } header: {
                     Text("Підказка")
                 } footer: {
-                    Footnote(isParakeet
-                             ? "Слова в потрібному написанні. Parakeet підказки не використовує — лише модель ШІ."
-                             : "Слова в потрібному написанні, з великої літери й крапкою в кінці — модель копіює і стиль.")
+                    Footnote("Слова в потрібному написанні, з великої літери й крапкою в кінці — модель копіює і стиль.")
                 }
             }
 
@@ -398,7 +395,7 @@ struct RecognitionPane: View {
     private var height: CGFloat {
         switch (isParakeet, settings.correctionEnabled) {
         case (true, false): return 340
-        case (true, true): return 575
+        case (true, true): return 400
         case (false, false): return 550
         case (false, true): return 610
         }
