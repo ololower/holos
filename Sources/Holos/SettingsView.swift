@@ -647,16 +647,21 @@ struct CorrectionPane: View {
     /// Збирається з тих самих констант, які використовує TextCorrector
     private var modelInputDescription: String {
         let base = settings.correctionServer.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let examples = TextCorrector.examples.map { "«\($0.0)»\n  → «\($0.1)»" }.joined(separator: "\n")
         return """
         запит           \(base)/v1/chat/completions
         модель          \(settings.correctionModel)
         параметри       temperature 0, без міркувань
+        текст           між <диктовка> і </диктовка>
         чекає           2 с + 1 с на кожні 100 символів,
                         потім вставляє текст як є
-        відкидає        відповідь, на 40 % довшу чи коротшу
-                        за текст: модель відповіла, а не виправила
+        відкидає        відповідь, схожу на текст менш ніж
+                        на \(Int(TextCorrector.minimumSimilarity * 100)) %: модель відповіла, а не виправила
         інструкції
         \(TextCorrector.systemPrompt(vocabulary: settings.prompt))
+
+        приклади перед текстом
+        \(examples)
         """
     }
 }
