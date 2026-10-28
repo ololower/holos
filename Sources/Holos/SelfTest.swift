@@ -81,7 +81,7 @@ enum SelfTest {
 
     /// Те саме виправлення моделлю, що й після диктування: що вставиться і за скільки
     static func correct(_ text: String, config: TextCorrector.Config) -> Int32 {
-        print("Сервер: \(config.server), модель: \(config.model), чекаю до \(String(format: "%.1f", TextCorrector.timeout(for: text))) с")
+        print("Сервер і модель: \(config.endpoint), чекаю до \(String(format: "%.1f", TextCorrector.timeout(for: text))) с")
         let corrector = TextCorrector()
         let start = Date()
         var outcome: TextCorrector.Outcome?

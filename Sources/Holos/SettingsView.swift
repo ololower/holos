@@ -350,13 +350,16 @@ struct RecognitionPane: View {
                          : "Ще моделі: scripts/download-model.sh turbo чи parakeet-ultra.")
             }
 
-            if !isParakeet {
+            // Parakeet підказки не бере, а модель ШІ — бере
+            if !isParakeet || settings.correctionEnabled {
                 Section {
                     TextArea(text: $settings.prompt, placeholder: "Імена й терміни, які треба писати саме так", height: 54)
                 } header: {
                     Text("Підказка")
                 } footer: {
-                    Footnote("Слова в потрібному написанні, з великої літери й крапкою в кінці — модель копіює і стиль.")
+                    Footnote(isParakeet
+                             ? "Слова в потрібному написанні. Parakeet підказки не використовує — лише модель ШІ."
+                             : "Слова в потрібному написанні, з великої літери й крапкою в кінці — модель копіює і стиль.")
                 }
             }
 
@@ -374,20 +377,45 @@ struct RecognitionPane: View {
             }
 
             Section {
-                DisclosureGroup("Що саме отримує модель") {
-                    Text(modelInputDescription)
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(.vertical, 4)
+                DescribedToggle(title: "Покращувати текст моделлю ШІ",
+                                description: "Виправляє слова, які розпізнавання почуло не так, і розділові знаки.",
+                                isOn: $settings.correctionEnabled)
+                if settings.correctionEnabled {
+                    TextField("Сервер і модель", text: $settings.correctionEndpoint,
+                              prompt: Text(Settings.defaultCorrectionEndpoint))
                 }
+            } footer: {
+                if settings.correctionEnabled { endpointFootnote }
             }
         }
         .formStyle(.grouped)
-        .frame(width: paneWidth, height: isParakeet ? 380 : 580)
+        .frame(width: paneWidth, height: height)
         .onAppear { models = InstalledModel.scan() }
     }
 
     private var isParakeet: Bool { settings.engine == .parakeet }
+
+    private var height: CGFloat {
+        switch (isParakeet, settings.correctionEnabled) {
+        case (true, false): return 340
+        case (true, true): return 575
+        case (false, false): return 550
+        case (false, true): return 610
+        }
+    }
+
+    @ViewBuilder
+    private var endpointFootnote: some View {
+        if let target = TextCorrector.target(settings.correctionEndpoint) {
+            if TextCorrector.isLocal(target.url) {
+                Footnote("Сервер на цьому Mac (llama serve, Ollama, LM Studio) і назва моделі на ньому.")
+            } else {
+                Footnote("Лише сервер на цьому Mac — 127.0.0.1 чи localhost.", warning: true)
+            }
+        } else {
+            Footnote("Адреса сервера й назва моделі одним рядком: \(Settings.defaultCorrectionEndpoint)", warning: true)
+        }
+    }
 
     /// Вибір моделі сам перемикає рушій: окремого перемикача рушія немає
     private var modelSelection: Binding<String> {
@@ -398,53 +426,6 @@ struct RecognitionPane: View {
                 settings.use(model.path, engine: model.engine)
             }
         )
-    }
-
-    /// Збирається з тих самих констант, які використовує рушій
-    private var modelInputDescription: String {
-        if isParakeet { return parakeetInputDescription }
-        let prompt = settings.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let vad = Transcriber.vadModelPath != nil
-            ? "\(Transcriber.vadModelName), запас \(Transcriber.vadPaddingMs) мс"
-            : "вимкнено (модель не знайдена)"
-        let language = settings.language == DictationLanguage.auto
-            ? "auto (визначається за першими 30 с)"
-            : "\(settings.language) (\(DictationLanguage.name(for: settings.language).lowercased()), автовизначення вимкнено)"
-        let indent = String(repeating: " ", count: 16)
-        let filtered = Transcriber.hallucinations.sorted().map { "\(indent)«\($0)»" }.joined(separator: "\n")
-        let retries = settings.noFallback ? "вимкнено" : "до \(Transcriber.fallbackRetries), з вищою «температурою»"
-        return """
-        аудіо           16 кГц, моно, лише з пам'яті
-        language        \(language)
-        initial_prompt  \(prompt.isEmpty ? "немає" : "«\(prompt)»")
-        декодування     beam search, ширина \(Transcriber.beamSize)
-        повтори         \(retries)
-        контекст        кожен запис окремо, без попередніх
-        VAD             \(vad)
-        фільтр          відкидає результат, якщо це лише:
-        \(filtered)
-                        або згадка Amara.org
-        після моделі    заміни: \(settings.replacements.rules.count) правил
-        """
-    }
-
-    /// Збирається з тих самих констант, які використовує ParakeetEngine
-    private var parakeetInputDescription: String {
-        let language: String
-        switch settings.language {
-        case DictationLanguage.auto: language = "визначає сама (25 європейських мов)"
-        case "uk": language = "визначає сама; не пише ы э ъ ё, токени з і ї є ґ отримують +\(Int(LanguageBias.ukrainianBonus)) до оцінки"
-        default: language = "визначає сама; не пише літер, яких немає в мові «\(settings.language)»"
-        }
-        return """
-        аудіо           16 кГц, моно, лише з пам'яті
-        вікно           15 с; довший запис ріжеться в паузах
-        мова            \(language)
-        підказка        не використовується
-        декодування     TDT, жадібне
-        VAD             немає (тишу відсікає Holos до розпізнавання)
-        після моделі    заміни: \(settings.replacements.rules.count) правил
-        """
     }
 
     @ViewBuilder
@@ -557,111 +538,5 @@ struct ReplacementsPane: View {
                 settings.replacementRules[index][keyPath: field] = value
             }
         )
-    }
-}
-
-// MARK: - Виправлення
-
-/// Виправлення розпізнаного тексту мовною моделлю на локальному сервері (див. TextCorrector)
-struct CorrectionPane: View {
-    @ObservedObject private var settings = Settings.shared
-    @State private var corrector = TextCorrector()
-    @State private var sample = ""
-    @State private var checking = false
-    @State private var result: (text: String, failed: Bool)?
-
-    var body: some View {
-        Form {
-            Section {
-                DescribedToggle(title: "Виправляти текст моделлю ШІ",
-                                description: "Мовна модель на цьому Mac виправляє слова, які розпізнавання почуло не так, і розділові знаки. Не встигла — вставиться текст як є.",
-                                isOn: $settings.correctionEnabled)
-            }
-
-            if settings.correctionEnabled {
-                Section {
-                    TextField("Сервер", text: $settings.correctionServer, prompt: Text(Settings.defaultCorrectionServer))
-                    TextField("Модель", text: $settings.correctionModel, prompt: Text(Settings.defaultCorrectionModel))
-                } header: {
-                    Text("Модель")
-                } footer: {
-                    if TextCorrector.isLocal(settings.correctionServer) {
-                        Footnote("Сервер з OpenAI-сумісним API на цьому Mac: llama.cpp (llama serve), Ollama, LM Studio. Імена й терміни модель бере з підказки на вкладці «Розпізнавання».")
-                    } else {
-                        Footnote("Лише сервер на цьому Mac — 127.0.0.1 або localhost. На інший Holos текст не надсилає.", warning: true)
-                    }
-                }
-
-                Section {
-                    LabeledContent("Перевірити") {
-                        HStack {
-                            TextField("Перевірити", text: $sample, prompt: Text("у меня додаток для диктовки"))
-                                .labelsHidden()
-                                .onSubmit(check)
-                            Button("Виправити", action: check)
-                                .disabled(sample.isEmpty || checking)
-                        }
-                    }
-                    if checking {
-                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Виправляю…") }
-                    } else if let result {
-                        LabeledContent("Вставиться") {
-                            Text(result.text)
-                                .foregroundStyle(result.failed ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-
-                Section {
-                    DisclosureGroup("Що саме отримує модель") {
-                        Text(modelInputDescription)
-                            .font(.system(.callout, design: .monospaced))
-                            .textSelection(.enabled)
-                            .padding(.vertical, 4)
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: paneWidth, height: settings.correctionEnabled ? 460 : 110)
-    }
-
-    private func check() {
-        guard !sample.isEmpty, !checking else { return }
-        checking = true
-        let text = sample
-        let started = Date()
-        corrector.correct(text, config: settings.correctionConfig) { outcome in
-            let seconds = String(format: "%.1f с", Date().timeIntervalSince(started))
-            switch outcome {
-            case .corrected(let corrected):
-                result = (corrected == text ? "\(corrected) (без змін, \(seconds))" : "\(corrected) (\(seconds))", false)
-            case .unchanged(let reason):
-                result = ("\(text) — як є: \(reason)", true)
-            }
-            checking = false
-        }
-    }
-
-    /// Збирається з тих самих констант, які використовує TextCorrector
-    private var modelInputDescription: String {
-        let base = settings.correctionServer.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        let examples = TextCorrector.examples.map { "«\($0.0)»\n  → «\($0.1)»" }.joined(separator: "\n")
-        return """
-        запит           \(base)/v1/chat/completions
-        модель          \(settings.correctionModel)
-        параметри       temperature 0, без міркувань
-        текст           між <диктовка> і </диктовка>
-        чекає           2 с + 1 с на кожні 100 символів,
-                        потім вставляє текст як є
-        відкидає        відповідь, схожу на текст менш ніж
-                        на \(Int(TextCorrector.minimumSimilarity * 100)) %: модель відповіла, а не виправила
-        інструкції
-        \(TextCorrector.systemPrompt(vocabulary: settings.prompt))
-
-        приклади перед текстом
-        \(examples)
-        """
     }
 }

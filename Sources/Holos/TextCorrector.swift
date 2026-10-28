@@ -7,9 +7,8 @@ import Foundation
 /// Сервер не відповів вчасно чи відповів щось дивне — вставляється текст як є.
 final class TextCorrector {
     struct Config: Equatable {
-        /// Адреса сервера без /v1, наприклад http://127.0.0.1:8080
-        var server: String
-        var model: String
+        /// Сервер і модель одним рядком: 127.0.0.1:8080/holos (див. target)
+        var endpoint: String
         /// Імена й терміни з підказки для розпізнавання — модель пише їх саме так
         var vocabulary: String
     }
@@ -64,10 +63,25 @@ final class TextCorrector {
         2 + Double(text.count) / 100
     }
 
+    /// «127.0.0.1:8080/holos» → http://127.0.0.1:8080/v1/chat/completions і модель «holos».
+    /// http:// можна не писати; модель — усе після адреси, тож годяться й «gemma4:e4b» (Ollama),
+    /// і «google/gemma-4-e4b» (LM Studio). nil — у рядку немає адреси чи моделі.
+    static func target(_ endpoint: String) -> (url: URL, model: String)? {
+        var text = endpoint.trimmingCharacters(in: .whitespaces)
+        if !text.contains("://") { text = "http://" + text }
+        guard var components = URLComponents(string: text), components.host?.isEmpty == false,
+              components.scheme == "http" || components.scheme == "https" else { return nil }
+        let model = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !model.isEmpty else { return nil }
+        components.path = "/v1/chat/completions"
+        components.query = nil
+        components.fragment = nil
+        return components.url.map { ($0, model) }
+    }
+
     /// Лише сервер на цьому Mac
-    static func isLocal(_ server: String) -> Bool {
-        guard let url = URL(string: server), url.scheme == "http" || url.scheme == "https",
-              let host = url.host?.lowercased() else { return false }
+    static func isLocal(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
         return ["127.0.0.1", "localhost", "::1"].contains(host)
     }
 
@@ -78,12 +92,17 @@ final class TextCorrector {
     private var lastConfig: Config?
 
     func correct(_ text: String, config: Config, completion: @escaping (Outcome) -> Void) {
-        guard Self.isLocal(config.server) else {
+        guard let target = Self.target(config.endpoint) else {
+            completion(.unchanged(reason: "не вказано сервер і модель"))
+            return
+        }
+        guard Self.isLocal(target.url) else {
             completion(.unchanged(reason: "сервер не на цьому Mac"))
             return
         }
         // Відповідь не довша за текст: токен — щонайменше два символи
-        let request = makeRequest(config, text: text, maxTokens: text.count / 2 + 64, timeout: Self.timeout(for: text))
+        let request = makeRequest(target, config: config, text: text, maxTokens: text.count / 2 + 64,
+                                  timeout: Self.timeout(for: text))
         var finished = false
         let task = session.dataTask(with: request) { [weak self] data, response, error in
             guard !finished else { return }
@@ -123,18 +142,19 @@ final class TextCorrector {
     /// Почали диктувати — сервер вантажить модель (якщо вивантажив після простою) і запам'ятовує
     /// інструкції, поки людина говорить. Не частіше, ніж раз на 5 хв після відповіді сервера.
     func warmUp(config: Config) {
-        guard Self.isLocal(config.server),
+        guard let target = Self.target(config.endpoint), Self.isLocal(target.url),
               lastConfig != config || Date().timeIntervalSince(lastContact) > 300 else { return }
-        session.dataTask(with: makeRequest(config, text: ".", maxTokens: 1, timeout: 120)) { [weak self] _, response, _ in
+        let request = makeRequest(target, config: config, text: ".", maxTokens: 1, timeout: 120)
+        session.dataTask(with: request) { [weak self] _, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             self?.lastContact = Date()
             self?.lastConfig = config
         }.resume()
     }
 
-    private func makeRequest(_ config: Config, text: String, maxTokens: Int, timeout: TimeInterval) -> URLRequest {
-        let base = config.server.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        var request = URLRequest(url: URL(string: base + "/v1/chat/completions")!, timeoutInterval: timeout)
+    private func makeRequest(_ target: (url: URL, model: String), config: Config, text: String, maxTokens: Int,
+                             timeout: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: target.url, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Інструкції й приклади однакові в кожному запиті — сервер обробляє їх лише раз і далі бере з кешу
@@ -145,7 +165,7 @@ final class TextCorrector {
         }
         messages.append(["role": "user", "content": Self.wrapped(text)])
         let body: [String: Any] = [
-            "model": config.model,
+            "model": target.model,
             "messages": messages,
             "temperature": 0,
             "max_tokens": maxTokens,

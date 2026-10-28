@@ -15,12 +15,9 @@ enum TranscriberError: LocalizedError {
 
 /// Обгортка над whisper.cpp. Не потокобезпечна: викликати з однієї послідовної черги.
 final class Transcriber {
-    // Параметри розпізнавання. Вікно налаштувань показує саме ці значення.
+    // Параметри розпізнавання
     static let beamSize = 5
     static let vadPaddingMs = 200
-    static let vadModelName = "Silero VAD v6.2.0"
-    /// Скільки разів whisper за замовчуванням повторює розпізнавання з вищою «температурою» (0,2 … 1,0)
-    static let fallbackRetries = 5
 
     /// Додаткові параметри (вкладка «Розпізнавання» → «Швидкість»)
     struct Options {

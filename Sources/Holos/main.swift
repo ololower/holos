@@ -38,16 +38,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--postprocess"), i + 1 < Comman
                               before: option("--before"), after: option("--after")))
 }
 
-// Виправлення моделлю на локальному сервері: Holos --correct <текст> [--server <адреса>] [--model <назва>]
-// Без --server і --model — з налаштувань.
+// Виправлення моделлю ШІ на локальному сервері: Holos --correct <текст> [--endpoint 127.0.0.1:8080/holos]
+// Без --endpoint — сервер і модель з налаштувань.
 if let i = CommandLine.arguments.firstIndex(of: "--correct"), i + 1 < CommandLine.arguments.count {
-    func option(_ name: String) -> String? {
-        guard let j = CommandLine.arguments.firstIndex(of: name), j + 1 < CommandLine.arguments.count else { return nil }
-        return CommandLine.arguments[j + 1]
-    }
     var config = Settings.shared.correctionConfig
-    config.server = option("--server") ?? config.server
-    config.model = option("--model") ?? config.model
+    if let j = CommandLine.arguments.firstIndex(of: "--endpoint"), j + 1 < CommandLine.arguments.count {
+        config.endpoint = CommandLine.arguments[j + 1]
+    }
     exit(SelfTest.correct(CommandLine.arguments[i + 1], config: config))
 }
 

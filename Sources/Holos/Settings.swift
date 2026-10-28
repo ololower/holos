@@ -197,20 +197,16 @@ final class Settings: ObservableObject {
         didSet { defaults.set(correctionEnabled, forKey: "correctionEnabled") }
     }
 
-    static let defaultCorrectionServer = "http://127.0.0.1:8080"
-    static let defaultCorrectionModel = "holos"
+    static let defaultCorrectionEndpoint = "127.0.0.1:8080/holos"
 
-    @Published var correctionServer: String {
-        didSet { defaults.set(correctionServer, forKey: "correctionServer") }
-    }
-
-    @Published var correctionModel: String {
-        didSet { defaults.set(correctionModel, forKey: "correctionModel") }
+    /// Сервер і модель одним рядком (див. TextCorrector.target)
+    @Published var correctionEndpoint: String {
+        didSet { defaults.set(correctionEndpoint, forKey: "correctionEndpoint") }
     }
 
     /// Підказка для розпізнавання — заодно й словник для моделі, що виправляє
     var correctionConfig: TextCorrector.Config {
-        TextCorrector.Config(server: correctionServer, model: correctionModel, vocabulary: prompt)
+        TextCorrector.Config(endpoint: correctionEndpoint, vocabulary: prompt)
     }
 
     private init() {
@@ -225,13 +221,14 @@ final class Settings: ObservableObject {
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         correctionEnabled = defaults.bool(forKey: "correctionEnabled")
-        correctionServer = defaults.string(forKey: "correctionServer") ?? Settings.defaultCorrectionServer
-        correctionModel = defaults.string(forKey: "correctionModel") ?? Settings.defaultCorrectionModel
+        correctionEndpoint = defaults.string(forKey: "correctionEndpoint") ?? Settings.defaultCorrectionEndpoint
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
         warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
         noFallback = defaults.bool(forKey: "experimentalNoFallback")
         // Налаштування, які прибрано
-        for key in ["keepMicrophoneWarm", "experimentalFastLongPhrases"] { defaults.removeObject(forKey: key) }
+        for key in ["keepMicrophoneWarm", "experimentalFastLongPhrases", "correctionServer", "correctionModel"] {
+            defaults.removeObject(forKey: key)
+        }
         if let data = defaults.data(forKey: "replacementRules"),
            let rules = try? JSONDecoder().decode([ReplacementRule].self, from: data) {
             replacementRules = rules
