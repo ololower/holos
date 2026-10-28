@@ -3,7 +3,13 @@ import Combine
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private enum Phase { case idle, recording, transcribing }
+    private enum Phase { case idle, recording, transcribing, correcting }
+
+    /// Продиктований текст: що вставили і що розпізнала модель до виправлення
+    private struct Record {
+        let text: String
+        let raw: String
+    }
 
     private let settings = Settings.shared
     private let status = AppStatus.shared
@@ -13,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let parakeet = ParakeetEngine()
     /// Рушій, модель якого зараз завантажено чи вантажиться
     private lazy var engine: SpeechEngine = whisper
+    private let corrector = TextCorrector()
     private let hotkey = HotkeyMonitor()
     private lazy var overlay = OverlayController()
     /// Уся робота з whisper — лише в цій черзі
@@ -36,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var handsFree = false
     private var recordingStartedAt = Date()
     /// Останні розпізнані тексти, найновіший першим. Лише в пам'яті — до виходу з Holos.
-    private var history: [String] = []
+    private var history: [Record] = []
     private let historyLimit = 5
     /// Чому зірвався останній запис; показується в меню до наступної спроби
     private var lastError: String?
@@ -221,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         phase = .recording
         overlay.show(.recording)
         playSound("Tink")
+        // Поки людина говорить, сервер устигне завантажити модель, якщо вивантажив її після простою
+        if settings.correctionEnabled { corrector.warmUp(config: settings.correctionConfig) }
         maxDurationTimer = Timer.scheduledTimer(withTimeInterval: maximumDuration, repeats: false) { [weak self] _ in
             self?.hotkey.reset()
             self?.finishRecording()
@@ -305,21 +314,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 Log.dictation.info("Розпізнано \(seconds, format: .fixed(precision: 1)) с аудіо за \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) с: \(text.count) символів")
-                self.phase = .idle
                 guard !text.isEmpty else {
+                    self.phase = .idle
                     self.overlay.hide()
                     return
                 }
-                self.remember(text)
-                TextInserter.insert(text)
-                self.overlay.show(.done)
-                self.overlay.hide(after: 0.7)
+                if self.settings.correctionEnabled {
+                    self.correct(text)
+                } else {
+                    self.deliver(text, raw: text)
+                }
             }
         }
     }
 
-    private func remember(_ text: String) {
-        history.insert(text, at: 0)
+    /// Не встигла модель чи відповіла дивно — вставляємо текст як є: диктування не має зависати
+    private func correct(_ text: String) {
+        phase = .correcting
+        let started = Date()
+        corrector.correct(text, config: settings.correctionConfig) { [weak self] outcome in
+            let seconds = Date().timeIntervalSince(started)
+            switch outcome {
+            case .corrected(let corrected):
+                let change = corrected == text ? "без змін" : "\(text.count) → \(corrected.count) символів"
+                Log.dictation.info("Виправлено за \(seconds, format: .fixed(precision: 2)) с: \(change, privacy: .public)")
+                self?.deliver(corrected, raw: text)
+            case .unchanged(let reason):
+                Log.dictation.notice("Без виправлення (\(reason, privacy: .public)) за \(seconds, format: .fixed(precision: 2)) с")
+                self?.deliver(text, raw: text)
+            }
+        }
+    }
+
+    private func deliver(_ text: String, raw: String) {
+        phase = .idle
+        remember(Record(text: text, raw: raw))
+        TextInserter.insert(text)
+        overlay.show(.done)
+        overlay.hide(after: 0.7)
+    }
+
+    private func remember(_ record: Record) {
+        history.insert(record, at: 0)
         if history.count > historyLimit { history.removeLast(history.count - historyLimit) }
     }
 
@@ -376,7 +412,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         historyMenu.addItem(.sectionHeader(title: "Клацніть — скопіювати, з ⌥ — вставити"))
-        for text in history {
+        for record in history {
+            let text = record.text
             let preview = Self.preview(text)
             let copy = NSMenuItem(title: preview, action: #selector(copyRecord(_:)), keyEquivalent: "")
             copy.keyEquivalentModifierMask = []
@@ -387,7 +424,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for item in [copy, insert] {
                 item.target = self
                 item.representedObject = text
-                item.toolTip = text
+                // Модель виправила — у підказці й те, що було до виправлення
+                item.toolTip = record.raw == text ? text : "\(text)\n\nДо виправлення: \(record.raw)"
                 historyMenu.addItem(item)
             }
         }
@@ -486,6 +524,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             text = "Слухаю… Відпустіть \(settings.triggerKey.shortTitle), щоб вставити текст"; tint = .systemRed
         case (.transcribing, _):
             symbol = "ellipsis.circle"; text = "Розпізнаю…"
+        case (.correcting, _):
+            symbol = "ellipsis.circle"; text = "Виправляю…"
         case (.idle, .loading):
             symbol = "hourglass"; text = "Завантажую модель…"
         case (.idle, .failed(let message)):

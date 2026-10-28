@@ -79,6 +79,30 @@ enum SelfTest {
         return 0
     }
 
+    /// Те саме виправлення моделлю, що й після диктування: що вставиться і за скільки
+    static func correct(_ text: String, config: TextCorrector.Config) -> Int32 {
+        print("Сервер: \(config.server), модель: \(config.model), чекаю до \(String(format: "%.1f", TextCorrector.timeout(for: text))) с")
+        let corrector = TextCorrector()
+        let start = Date()
+        var outcome: TextCorrector.Outcome?
+        corrector.correct(text, config: config) { outcome = $0 }
+        while outcome == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
+        switch outcome {
+        case .corrected(let corrected) where corrected == text:
+            print("Без змін за \(seconds) с")
+        case .corrected(let corrected):
+            print("Виправлено за \(seconds) с:")
+            print(corrected)
+        case .unchanged(let reason):
+            print("Вставиться як є (\(reason)), \(seconds) с")
+            return 1
+        case nil:
+            break
+        }
+        return 0
+    }
+
     /// Запис із мікрофона без інтерфейсу — тим самим AudioRecorder, що й під час диктування.
     /// Мікрофон береться з налаштувань Holos, якщо не вказано інший.
     static func record(seconds: TimeInterval, deviceUID: String) -> Int32 {

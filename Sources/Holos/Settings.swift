@@ -192,6 +192,27 @@ final class Settings: ObservableObject {
         didSet { defaults.set(playSounds, forKey: "playSounds") }
     }
 
+    /// Виправляти розпізнаний текст мовною моделлю на локальному сервері (див. TextCorrector)
+    @Published var correctionEnabled: Bool {
+        didSet { defaults.set(correctionEnabled, forKey: "correctionEnabled") }
+    }
+
+    static let defaultCorrectionServer = "http://127.0.0.1:8080"
+    static let defaultCorrectionModel = "holos"
+
+    @Published var correctionServer: String {
+        didSet { defaults.set(correctionServer, forKey: "correctionServer") }
+    }
+
+    @Published var correctionModel: String {
+        didSet { defaults.set(correctionModel, forKey: "correctionModel") }
+    }
+
+    /// Підказка для розпізнавання — заодно й словник для моделі, що виправляє
+    var correctionConfig: TextCorrector.Config {
+        TextCorrector.Config(server: correctionServer, model: correctionModel, vocabulary: prompt)
+    }
+
     private init() {
         triggerKey = TriggerKey(rawValue: defaults.string(forKey: "triggerKey") ?? "") ?? .rightOption
         language = defaults.string(forKey: "language") ?? DictationLanguage.defaultCode
@@ -203,6 +224,9 @@ final class Settings: ObservableObject {
         parakeetModelPath = defaults.string(forKey: "parakeetModelPath") ?? Settings.defaultParakeetModelPath
         prompt = defaults.string(forKey: "prompt") ?? ""
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
+        correctionEnabled = defaults.bool(forKey: "correctionEnabled")
+        correctionServer = defaults.string(forKey: "correctionServer") ?? Settings.defaultCorrectionServer
+        correctionModel = defaults.string(forKey: "correctionModel") ?? Settings.defaultCorrectionModel
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
         warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
         noFallback = defaults.bool(forKey: "experimentalNoFallback")

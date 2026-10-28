@@ -559,3 +559,104 @@ struct ReplacementsPane: View {
         )
     }
 }
+
+// MARK: - Виправлення
+
+/// Виправлення розпізнаного тексту мовною моделлю на локальному сервері (див. TextCorrector)
+struct CorrectionPane: View {
+    @ObservedObject private var settings = Settings.shared
+    @State private var corrector = TextCorrector()
+    @State private var sample = ""
+    @State private var checking = false
+    @State private var result: (text: String, failed: Bool)?
+
+    var body: some View {
+        Form {
+            Section {
+                DescribedToggle(title: "Виправляти текст моделлю ШІ",
+                                description: "Мовна модель на цьому Mac виправляє слова, які розпізнавання почуло не так, і розділові знаки. Не встигла — вставиться текст як є.",
+                                isOn: $settings.correctionEnabled)
+            }
+
+            if settings.correctionEnabled {
+                Section {
+                    TextField("Сервер", text: $settings.correctionServer, prompt: Text(Settings.defaultCorrectionServer))
+                    TextField("Модель", text: $settings.correctionModel, prompt: Text(Settings.defaultCorrectionModel))
+                } header: {
+                    Text("Модель")
+                } footer: {
+                    if TextCorrector.isLocal(settings.correctionServer) {
+                        Footnote("Сервер з OpenAI-сумісним API на цьому Mac: llama.cpp (llama serve), Ollama, LM Studio. Імена й терміни модель бере з підказки на вкладці «Розпізнавання».")
+                    } else {
+                        Footnote("Лише сервер на цьому Mac — 127.0.0.1 або localhost. На інший Holos текст не надсилає.", warning: true)
+                    }
+                }
+
+                Section {
+                    LabeledContent("Перевірити") {
+                        HStack {
+                            TextField("Перевірити", text: $sample, prompt: Text("у меня додаток для диктовки"))
+                                .labelsHidden()
+                                .onSubmit(check)
+                            Button("Виправити", action: check)
+                                .disabled(sample.isEmpty || checking)
+                        }
+                    }
+                    if checking {
+                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Виправляю…") }
+                    } else if let result {
+                        LabeledContent("Вставиться") {
+                            Text(result.text)
+                                .foregroundStyle(result.failed ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                Section {
+                    DisclosureGroup("Що саме отримує модель") {
+                        Text(modelInputDescription)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: paneWidth, height: settings.correctionEnabled ? 460 : 110)
+    }
+
+    private func check() {
+        guard !sample.isEmpty, !checking else { return }
+        checking = true
+        let text = sample
+        let started = Date()
+        corrector.correct(text, config: settings.correctionConfig) { outcome in
+            let seconds = String(format: "%.1f с", Date().timeIntervalSince(started))
+            switch outcome {
+            case .corrected(let corrected):
+                result = (corrected == text ? "\(corrected) (без змін, \(seconds))" : "\(corrected) (\(seconds))", false)
+            case .unchanged(let reason):
+                result = ("\(text) — як є: \(reason)", true)
+            }
+            checking = false
+        }
+    }
+
+    /// Збирається з тих самих констант, які використовує TextCorrector
+    private var modelInputDescription: String {
+        let base = settings.correctionServer.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        return """
+        запит           \(base)/v1/chat/completions
+        модель          \(settings.correctionModel)
+        параметри       temperature 0, без міркувань
+        чекає           2 с + 1 с на кожні 100 символів,
+                        потім вставляє текст як є
+        відкидає        відповідь, на 40 % довшу чи коротшу
+                        за текст: модель відповіла, а не виправила
+        інструкції
+        \(TextCorrector.systemPrompt(vocabulary: settings.prompt))
+        """
+    }
+}
