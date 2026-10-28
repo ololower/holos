@@ -204,6 +204,18 @@ final class Settings: ObservableObject {
         didSet { defaults.set(correctionEndpoint, forKey: "correctionEndpoint") }
     }
 
+    /// Зберігати аудіо й текст кожного диктування на цьому Mac для аналізу помилок (див. Journal)
+    @Published var keepJournal: Bool {
+        didSet { defaults.set(keepJournal, forKey: "keepJournal") }
+    }
+
+    /// Тека журналу диктувань
+    @Published var journalPath: String {
+        didSet { defaults.set(journalPath, forKey: "journalPath") }
+    }
+
+    var journalDirectory: URL { URL(fileURLWithPath: journalPath, isDirectory: true) }
+
     /// Підказка для розпізнавання — заодно й словник для моделі, що виправляє
     var correctionConfig: TextCorrector.Config {
         TextCorrector.Config(endpoint: correctionEndpoint, vocabulary: prompt)
@@ -222,6 +234,8 @@ final class Settings: ObservableObject {
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         correctionEnabled = defaults.bool(forKey: "correctionEnabled")
         correctionEndpoint = defaults.string(forKey: "correctionEndpoint") ?? Settings.defaultCorrectionEndpoint
+        keepJournal = defaults.bool(forKey: "keepJournal")
+        journalPath = defaults.string(forKey: "journalPath") ?? Journal.defaultDirectory.path
         handsFree = defaults.object(forKey: "handsFree") as? Bool ?? true
         warmUpModel = defaults.bool(forKey: "experimentalWarmUp")
         noFallback = defaults.bool(forKey: "experimentalNoFallback")

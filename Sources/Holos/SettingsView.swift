@@ -161,7 +161,9 @@ struct GeneralPane: View {
                     if settings.restartAfterCrash && !Watchdog.isInstalledCopy {
                         Footnote("Перезапуск працює лише для копії в /Applications.", warning: true)
                     }
-                    Footnote("Holos \(AppDelegate.version) · працює офлайн: аудіо лише в пам’яті й нікуди не надсилається.")
+                    Footnote(settings.keepJournal
+                             ? "Holos \(AppDelegate.version) · працює офлайн: аудіо нікуди не надсилається, а диктування зберігаються на цьому Mac."
+                             : "Holos \(AppDelegate.version) · працює офлайн: аудіо лише в пам’яті й нікуди не надсилається.")
                 }
             }
         }
@@ -319,6 +321,7 @@ struct RecognitionPane: View {
     @ObservedObject private var settings = Settings.shared
     @ObservedObject private var status = AppStatus.shared
     @State private var models: [InstalledModel] = []
+    @State private var journalCount = 0
 
     var body: some View {
         Form {
@@ -384,21 +387,65 @@ struct RecognitionPane: View {
             } footer: {
                 if settings.correctionEnabled { endpointFootnote }
             }
+
+            Section {
+                DescribedToggle(title: "Зберігати диктування на цьому Mac",
+                                description: "Holos записує на диск аудіо й текст кожного диктування — до і після моделі ШІ, щоб знайти, які слова розпізнаються не так.",
+                                isOn: $settings.keepJournal)
+                if settings.keepJournal {
+                    LabeledContent("Тека") {
+                        HStack {
+                            Text((settings.journalPath as NSString).abbreviatingWithTildeInPath)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.secondary)
+                                .help(settings.journalPath)
+                            Button("Змінити…", action: chooseJournalFolder)
+                        }
+                    }
+                    LabeledContent("Записів: \(journalCount)") {
+                        Button("Показати в Finder", action: showJournal)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: paneWidth, height: height)
-        .onAppear { models = InstalledModel.scan() }
+        .onAppear {
+            models = InstalledModel.scan()
+            journalCount = Journal.count(in: settings.journalDirectory)
+        }
+        .onChange(of: settings.journalPath) { _, _ in journalCount = Journal.count(in: settings.journalDirectory) }
+    }
+
+    private func chooseJournalFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Тека для журналу диктувань"
+        panel.prompt = "Вибрати"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.journalDirectory.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.journalPath = url.path
+    }
+
+    private func showJournal() {
+        try? FileManager.default.createDirectory(at: settings.journalDirectory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(settings.journalDirectory)
     }
 
     private var isParakeet: Bool { settings.engine == .parakeet }
 
     private var height: CGFloat {
+        let base: CGFloat
         switch (isParakeet, settings.correctionEnabled) {
-        case (true, false): return 340
-        case (true, true): return 400
-        case (false, false): return 550
-        case (false, true): return 610
+        case (true, false): base = 340
+        case (true, true): base = 400
+        case (false, false): base = 550
+        case (false, true): base = 610
         }
+        return base + (settings.keepJournal ? 175 : 75)
     }
 
     @ViewBuilder

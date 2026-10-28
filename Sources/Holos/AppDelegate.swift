@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Рушій, модель якого зараз завантажено чи вантажиться
     private lazy var engine: SpeechEngine = whisper
     private let corrector = TextCorrector()
+    private let journal = Journal()
+    /// Диктування для журналу (Settings.keepJournal), поки текст розпізнається й виправляється
+    private var journalEntry: (entry: Journal.Entry, samples: [Float])?
     private let hotkey = HotkeyMonitor()
     private lazy var overlay = OverlayController()
     /// Уся робота з whisper — лише в цій черзі
@@ -308,13 +311,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let options = settings.transcriberOptions
         let seconds = Double(samples.count) / AudioRecorder.sampleRate
         let started = Date()
+        let keepJournal = settings.keepJournal
+        let engineName = settings.engine.rawValue
+        let modelName = InstalledModel.title(for: (settings.activeModelPath as NSString).lastPathComponent)
         work.async { [weak self, engine] in
             let raw = engine.transcribe(samples, prompt: prompt, language: language, options: options)
             let text = replacements.apply(to: raw)
+            let recognizeSeconds = Date().timeIntervalSince(started)
             DispatchQueue.main.async {
                 guard let self else { return }
-                Log.dictation.info("Розпізнано \(seconds, format: .fixed(precision: 1)) с аудіо за \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) с: \(text.count) символів")
+                Log.dictation.info("Розпізнано \(seconds, format: .fixed(precision: 1)) с аудіо за \(recognizeSeconds, format: .fixed(precision: 1)) с: \(text.count) символів")
+                if keepJournal {
+                    let entry = Journal.Entry(id: Journal.id(for: started), date: started, audioSeconds: seconds,
+                                              engine: engineName, model: modelName, language: language,
+                                              recognizeSeconds: recognizeSeconds, recognized: raw, replaced: text)
+                    self.journalEntry = (entry, samples)
+                }
                 guard !text.isEmpty else {
+                    // Сказано щось, а вставити нічого — теж помилка, яку варто бачити в журналі
+                    self.saveJournal(inserted: "")
                     self.phase = .idle
                     self.overlay.hide()
                     return
@@ -334,13 +349,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let started = Date()
         corrector.correct(text, config: settings.correctionConfig) { [weak self] outcome in
             let seconds = Date().timeIntervalSince(started)
+            self?.journalEntry?.entry.correctionSeconds = seconds
             switch outcome {
             case .corrected(let corrected):
                 let change = corrected == text ? "без змін" : "\(text.count) → \(corrected.count) символів"
                 Log.dictation.info("Виправлено за \(seconds, format: .fixed(precision: 2)) с: \(change, privacy: .public)")
+                self?.journalEntry?.entry.correction = corrected == text ? "без змін" : "виправлено"
                 self?.deliver(corrected, raw: text)
             case .unchanged(let reason):
                 Log.dictation.notice("Без виправлення (\(reason, privacy: .public)) за \(seconds, format: .fixed(precision: 2)) с")
+                self?.journalEntry?.entry.correction = reason
                 self?.deliver(text, raw: text)
             }
         }
@@ -350,8 +368,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         phase = .idle
         remember(Record(text: text, raw: raw))
         TextInserter.insert(text)
+        saveJournal(inserted: text)
         overlay.show(.done)
         overlay.hide(after: 0.7)
+    }
+
+    private func saveJournal(inserted: String) {
+        guard var pending = journalEntry else { return }
+        journalEntry = nil
+        pending.entry.inserted = inserted
+        journal.save(pending.entry, samples: pending.samples, in: settings.journalDirectory)
     }
 
     private func remember(_ record: Record) {
