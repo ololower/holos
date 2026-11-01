@@ -10,6 +10,7 @@ struct ReplacementRule: Codable, Hashable, Identifiable {
 /// Заміни в уже розпізнаному тексті — для слів, які whisper пише не так навіть із підказкою.
 /// Сама модель про них не знає: Holos шукає фрази в її результаті й замінює.
 /// Регістр у `from` не важить; замінюється лише ціле слово чи фраза, не шматок слова.
+/// «*» у `from` — будь-які літери: «страйп*» → Stripe замінює й «страйпі», і «страйпом».
 /// `to` вставляється як є; порожнє — прибирає фразу разом із зайвими комами.
 struct Replacements {
     /// Лише правила з непорожнім `from`
@@ -22,8 +23,14 @@ struct Replacements {
             return from.isEmpty ? nil : ReplacementRule(id: rule.id, from: from, to: rule.to.trimmingCharacters(in: .whitespaces))
         }
         compiled = self.rules.compactMap { rule in
+            // Самі зірочки збігалися б із порожнім місцем будь-де
+            guard rule.from.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
+            // «*» — будь-яке закінчення чи вставка з літер: «страйп*» ловить «страйп», «страйпі», «страйпом»
+            let body = rule.from.components(separatedBy: "*")
+                .map { NSRegularExpression.escapedPattern(for: $0) }
+                .joined(separator: "[\\p{L}\\p{M}'’ʼ]*")
             // Межі слова — будь-який символ, що не літера й не цифра (\b у ICU не завжди дружить з апострофом)
-            let pattern = "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: rule.from) + "(?![\\p{L}\\p{N}])"
+            let pattern = "(?<![\\p{L}\\p{N}])" + body + "(?![\\p{L}\\p{N}])"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
             return (regex, NSRegularExpression.escapedTemplate(for: rule.to))
         }
