@@ -5,6 +5,64 @@ import SwiftUI
 /// Перевірка розпізнавання з файлу без інтерфейсу й мікрофона.
 /// Аудіо проходить через той самий конвертер, що й запис із мікрофона.
 enum SelfTest {
+    /// Аудіофайл → 16 кГц моно тим самим конвертером, що й запис із мікрофона; nil — не відкрився
+    static func samples(from file: String) -> [Float]? {
+        guard let audioFile = try? AVAudioFile(forReading: URL(fileURLWithPath: file)) else { return nil }
+        let format = audioFile.processingFormat
+        guard let converter = AVAudioConverter(from: format, to: AudioRecorder.targetFormat),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else { return nil }
+        converter.downmix = true
+        var samples: [Float] = []
+        while audioFile.framePosition < audioFile.length {
+            do { try audioFile.read(into: buffer) } catch { break }
+            if buffer.frameLength == 0 { break }
+            samples += AudioRecorder.convert(buffer, with: converter)
+        }
+        return samples
+    }
+
+    /// Багато файлів однією моделлю — для замірів на журналі диктувань. `list` — шляхи до аудіо, по одному
+    /// на рядок. На кожен файл — рядок JSON {"file", "text", "seconds"} у stdout.
+    static func batch(list: String, engineKind: SpeechEngineKind, modelPath: String, prompt: String, language: String,
+                      options: Transcriber.Options, tuning: ParakeetEngine.Tuning) -> Int32 {
+        guard let content = try? String(contentsOfFile: list, encoding: .utf8) else {
+            FileHandle.standardError.write("Не вдалося прочитати список \(list)\n".data(using: .utf8)!)
+            return 1
+        }
+        let files = content.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        let engine: SpeechEngine
+        if engineKind == .parakeet {
+            let parakeet = ParakeetEngine()
+            parakeet.tuning = tuning
+            engine = parakeet
+        } else {
+            engine = Transcriber()
+        }
+        do {
+            try engine.load(path: modelPath)
+        } catch {
+            FileHandle.standardError.write("\(error.localizedDescription)\n".data(using: .utf8)!)
+            return 1
+        }
+        engine.warmUp()
+        for file in files {
+            var text = ""
+            var seconds = 0.0
+            if let samples = samples(from: file), !samples.isEmpty {
+                let start = Date()
+                text = engine.transcribe(samples, prompt: prompt, language: language, options: options)
+                seconds = Date().timeIntervalSince(start)
+            }
+            let row: [String: Any] = ["file": file, "text": text, "seconds": (seconds * 1000).rounded() / 1000]
+            if let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys, .withoutEscapingSlashes]),
+               let line = String(data: data, encoding: .utf8) {
+                print(line)
+                fflush(stdout)
+            }
+        }
+        return 0
+    }
+
     static func run(file: String, engineKind: SpeechEngineKind = .whisper, modelPath: String, prompt: String, language: String,
                     options: Transcriber.Options = Transcriber.Options(), warmUp: Bool = false) -> Int32 {
         let audioFile: AVAudioFile

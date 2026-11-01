@@ -25,6 +25,33 @@ if let i = CommandLine.arguments.firstIndex(of: "--transcribe"), i + 1 < Command
                       warmUp: flags.contains("--warmup")))
 }
 
+// Багато файлів однією моделлю — для замірів на журналі (scripts/journal/evaluate.py):
+// Holos --transcribe-batch <список шляхів> [--engine whisper|parakeet] [--model <шлях>] [--prompt <підказка>]
+//       [--language <код|auto>] [--no-fallback] [--tune "blankPenalty=1,padSeconds=0.3"]
+// --tune — параметри Parakeet (ParakeetEngine.Tuning); у застосунку завжди типові.
+if let i = CommandLine.arguments.firstIndex(of: "--transcribe-batch"), i + 1 < CommandLine.arguments.count {
+    func option(_ name: String) -> String? {
+        guard let j = CommandLine.arguments.firstIndex(of: name), j + 1 < CommandLine.arguments.count else { return nil }
+        return CommandLine.arguments[j + 1]
+    }
+    let engine = SpeechEngineKind(rawValue: option("--engine") ?? "") ?? .whisper
+    var tuning = ParakeetEngine.Tuning()
+    if let text = option("--tune") {
+        guard let parsed = ParakeetEngine.Tuning.parse(text) else {
+            FileHandle.standardError.write("Невідомий параметр у --tune: \(text)\n".data(using: .utf8)!)
+            exit(1)
+        }
+        tuning = parsed
+    }
+    exit(SelfTest.batch(list: CommandLine.arguments[i + 1],
+                        engineKind: engine,
+                        modelPath: option("--model") ?? (engine == .parakeet ? Settings.defaultParakeetModelPath : Settings.defaultModelPath),
+                        prompt: option("--prompt") ?? "",
+                        language: option("--language") ?? DictationLanguage.defaultCode,
+                        options: Transcriber.Options(noFallback: CommandLine.arguments.contains("--no-fallback")),
+                        tuning: tuning))
+}
+
 // Заміни й пробіли навколо тексту без розпізнавання:
 // Holos --postprocess <текст> [--rules "що > на що"…] [--before <символ>] [--after <символ>]
 // Без --rules — заміни з налаштувань.

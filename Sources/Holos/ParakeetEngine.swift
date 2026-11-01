@@ -49,6 +49,47 @@ final class ParakeetEngine: SpeechEngine {
     /// Номер токена → шматок SentencePiece (пробіл на початку — початок слова)
     private var vocabulary: [String] = []
 
+    /// Параметри декодування й підготовки звуку. Типові — як у застосунку; інші задаються лише
+    /// з командного рядка (`--tune`), щоб заміряти їх на журналі диктувань (scripts/journal/evaluate.py).
+    struct Tuning {
+        /// Бонус до логіта для токенів з літерами, які є лише в українській (див. LanguageBias)
+        var ukrainianBonus: Float = LanguageBias.ukrainianBonus
+        /// Не випускати токени з ы, э, ъ, ё
+        var banRussianLetters = true
+        /// Штраф до логіта для токенів з латиницею (0 — без штрафу)
+        var latinPenalty: Float = 0
+        /// Штраф порожньому токену: > 0 — модель частіше пише слово, < 0 — частіше мовчить
+        var blankPenalty: Float = 0
+        /// Тиша на початку й у кінці запису, с
+        var padSeconds: Double = 0
+        /// Підігнати гучність під цей піковий рівень (0 — як записано)
+        var peakLevel: Float = 0
+        var maxSymbolsPerFrame = ParakeetEngine.maxSymbolsPerFrame
+
+        /// «ukrainianBonus=1.5,blankPenalty=-1» → параметри; nil — невідомий параметр чи значення
+        static func parse(_ text: String) -> Tuning? {
+            var tuning = Tuning()
+            for pair in text.split(separator: ",") {
+                let parts = pair.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                guard parts.count == 2 else { return nil }
+                let value = parts[1]
+                switch parts[0] {
+                case "ukrainianBonus": guard let v = Float(value) else { return nil }; tuning.ukrainianBonus = v
+                case "banRussianLetters": guard let v = Bool(value) else { return nil }; tuning.banRussianLetters = v
+                case "latinPenalty": guard let v = Float(value) else { return nil }; tuning.latinPenalty = v
+                case "blankPenalty": guard let v = Float(value) else { return nil }; tuning.blankPenalty = v
+                case "padSeconds": guard let v = Double(value) else { return nil }; tuning.padSeconds = v
+                case "peakLevel": guard let v = Float(value) else { return nil }; tuning.peakLevel = v
+                case "maxSymbolsPerFrame": guard let v = Int(value), v > 0 else { return nil }; tuning.maxSymbolsPerFrame = v
+                default: return nil
+                }
+            }
+            return tuning
+        }
+    }
+
+    var tuning = Tuning()
+
     func load(path: String) throws {
         unload()
         let directory = URL(fileURLWithPath: path)
@@ -89,9 +130,18 @@ final class ParakeetEngine: SpeechEngine {
 
     func transcribe(_ input: [Float], prompt: String, language: String, options: Transcriber.Options) -> String {
         guard preprocessor != nil, !input.isEmpty else { return "" }
-        let bias = LanguageBias(language: language)
+        let bias = LanguageBias(language: language, tuning: tuning)
+        var samples = input
+        if tuning.peakLevel > 0, let peak = samples.map(abs).max(), peak > 0.001 {
+            let gain = tuning.peakLevel / peak
+            samples = samples.map { $0 * gain }
+        }
+        if tuning.padSeconds > 0 {
+            let silence = [Float](repeating: 0, count: Int(tuning.padSeconds * Double(Self.sampleRate)))
+            samples = silence + samples + silence
+        }
         do {
-            let text = try Self.segments(input).map { try decode($0, bias: bias) }.joined(separator: " ")
+            let text = try Self.segments(samples).map { try decode($0, bias: bias) }.joined(separator: " ")
             return Transcriber.clean(text)
         } catch {
             Log.dictation.error("\(error.localizedDescription, privacy: .public)")
@@ -169,8 +219,13 @@ final class ParakeetEngine: SpeechEngine {
                 "decoder_step": state.output,
             ]))
             var token = try Self.output(decision, "token_id")[0].intValue
-            // Порожній токен не чіпаємо: інакше упередження вставляло б слова там, де мовчали
-            if let bias, token != Self.blankId {
+            // Порожній токен мовне упередження не чіпає: інакше воно вставляло б слова там, де мовчали.
+            // Лише штраф порожньому (blankPenalty) може змінити його на слово
+            if token != Self.blankId {
+                if bias != nil || tuning.blankPenalty < 0 {
+                    token = try rerank(decision, bias: bias) ?? token
+                }
+            } else if tuning.blankPenalty > 0 {
                 token = try rerank(decision, bias: bias) ?? token
             }
             let bin = try Self.output(decision, "duration")[0].intValue
@@ -190,7 +245,7 @@ final class ParakeetEngine: SpeechEngine {
                 lastEmission = time
                 emissionsHere = 1
             }
-            if emissionsHere >= Self.maxSymbolsPerFrame {
+            if emissionsHere >= tuning.maxSymbolsPerFrame {
                 time += 1
                 emissionsHere = 0
                 lastEmission = -1
@@ -223,15 +278,22 @@ final class ParakeetEngine: SpeechEngine {
                             c: try Self.output(result, "c_out"))
     }
 
-    /// Найкращий із 64 кандидатів з урахуванням мовного упередження
-    private func rerank(_ decision: MLFeatureProvider, bias: LanguageBias) throws -> Int? {
+    /// Найкращий із 64 кандидатів з урахуванням мовного упередження й штрафу порожньому токену
+    private func rerank(_ decision: MLFeatureProvider, bias: LanguageBias?) throws -> Int? {
         let ids = try Self.output(decision, "top_k_ids")
         let logits = try Self.output(decision, "top_k_logits")
         var best: (id: Int, score: Float)?
         for index in 0..<ids.count {
             let id = ids[index].intValue
             let logit = logits[index].floatValue
-            let score = id == Self.blankId ? logit : bias.score(piece(id), logit: logit)
+            let score: Float?
+            if id == Self.blankId {
+                score = logit - tuning.blankPenalty
+            } else if let bias {
+                score = bias.score(piece(id), logit: logit)
+            } else {
+                score = logit
+            }
             guard let score else { continue }
             if best == nil || score > best!.score { best = (id, score) }
         }
@@ -273,21 +335,24 @@ struct LanguageBias {
     private let forbidden: (Unicode.Scalar) -> Bool
     private let favoured: (Unicode.Scalar) -> Bool
     private let bonus: Float
+    /// Штраф токенам з латиницею — лише для української (Tuning.latinPenalty)
+    private var latinPenalty: Float = 0
 
     /// Мови Parakeet з латинським письмом
     private static let latinLanguages: Set<String> = ["en", "de", "fr", "es", "it", "pt", "hr", "sl", "lv", "lt", "et",
                                                      "fi", "sv", "da", "nl", "pl", "cs", "sk", "hu", "ro", "mt"]
 
     /// nil — без упередження (автовизначення чи мова без однозначного набору літер)
-    init?(language: String) {
+    init?(language: String, tuning: ParakeetEngine.Tuning = ParakeetEngine.Tuning()) {
         switch language {
         case "uk":
             // Латиницю дозволяємо: git, PhpStorm
             let russianOnly = Set("ыэъёЫЭЪЁ".unicodeScalars)
             let ukrainianOnly = Set("іїєґІЇЄҐ".unicodeScalars)
-            forbidden = { russianOnly.contains($0) }
+            forbidden = tuning.banRussianLetters ? { russianOnly.contains($0) } : { _ in false }
             favoured = { ukrainianOnly.contains($0) }
-            bonus = Self.ukrainianBonus
+            bonus = tuning.ukrainianBonus
+            latinPenalty = tuning.latinPenalty
         case "ru":
             let ukrainianOnly = Set("іїєґІЇЄҐ".unicodeScalars)
             forbidden = { ukrainianOnly.contains($0) }
@@ -306,6 +371,10 @@ struct LanguageBias {
     func score(_ piece: String, logit: Float) -> Float? {
         let scalars = piece.unicodeScalars
         if scalars.contains(where: forbidden) { return nil }
-        return scalars.contains(where: favoured) ? logit + bonus : logit
+        var score = scalars.contains(where: favoured) ? logit + bonus : logit
+        if latinPenalty != 0 && scalars.contains(where: { $0.isASCII && $0.properties.isAlphabetic }) {
+            score -= latinPenalty
+        }
+        return score
     }
 }

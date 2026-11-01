@@ -217,6 +217,16 @@ python3 scripts/journal/label.py            # відкриє http://127.0.0.1:87
 - `reference.jsonl` — еталон, переписується після кожного ↵. Рядок самодостатній: `id`, `audio` (шлях відносно теки), `text` (що сказано; порожньо — без мовлення), `status` (`ok`, `no_speech`, `unsure`), `edited` (чи правили чернетку), `draft`, `parakeet`, `gemma`, `whisper`, `reviewedAt`. Годиться і для заміру точності, і для донавчання;
 - `drafts.jsonl` (необов'язково, створюється окремо) — чернетки `{id, draft, note, whisper}`: з чого почати розмітку і що в ній під сумнівом. Без нього чернетка — текст Parakeet.
 
+#### Замір: чи стало краще
+
+```bash
+python3 scripts/journal/evaluate.py --errors 20                 # Parakeet, вставлене й whisper з журналу проти еталона
+python3 scripts/journal/rerun.py нова --tune "blankPenalty=1"   # розпізнати всі розмічені записи заново (scripts/build.sh перед тим)
+python3 scripts/journal/evaluate.py "<тека журналу>/runs/нова.jsonl"
+```
+
+`evaluate.py` рахує частку неправильних слів (WER: заміни, пропуски й вставки на 100 слів еталона) без регістру й розділових знаків, скільки фраз розпізнано без жодної помилки і скільки разів на записах без мовлення щось вигадано. `rerun.py` кладе результат у `runs/` теки журналу.
+
 ## Моделі
 
 Моделі лежать у `~/Library/Application Support/Holos/models/` і вибираються в Налаштування → «Розпізнавання» → «Модель»; «Інша…» — модель з іншого місця.
@@ -336,7 +346,8 @@ Sources/Holos/
   Log.swift                журнал у системному журналі macOS
   SelfTest.swift           режими перевірки без інтерфейсу
 scripts/                   збирання, оновлення, залежності, модель, підпис, іконка
-scripts/journal/           розмітка журналу диктувань: label.py (сервер) і label.html (сторінка)
+scripts/journal/           журнал диктувань: label.py + label.html (розмітка еталона), rerun.py (розпізнати
+                           розмічені записи заново), evaluate.py (частка неправильних слів проти еталона)
 ```
 
 Перевірка без мікрофона й інтерфейсу:
@@ -345,6 +356,10 @@ scripts/journal/           розмітка журналу диктувань: l
 # розпізнати аудіофайл (мова за замовчуванням — uk); --warmup і --no-fallback — як у «Швидкості»
 build/Holos.app/Contents/MacOS/Holos --transcribe фраза.wav [--engine whisper|parakeet] [--model шлях] [--prompt "підказка"] [--language en|auto] \
     [--warmup] [--no-fallback]
+
+# багато файлів однією моделлю: список шляхів по одному на рядок → рядок JSON на файл.
+# --tune — параметри декодування Parakeet для замірів (ParakeetEngine.Tuning); у застосунку завжди типові
+build/Holos.app/Contents/MacOS/Holos --transcribe-batch список.txt --engine parakeet [--tune "blankPenalty=1,padSeconds=0.3"]
 
 # заміни й пробіли: що вставиться, якщо перед курсором «о», а після — кінець поля
 build/Holos.app/Contents/MacOS/Holos --postprocess "Пі ейч пі шторм." --rules "пі ейч пі шторм > PhpStorm" --before о --after край
