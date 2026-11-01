@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holos · коректура</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23fbf8f1'/%3E%3Cpath d='M8 23 20 11l3 3-12 12H8z' fill='%23c4361a'/%3E%3Cpath d='m21 10 2-2 3 3-2 2z' fill='%231e1a15'/%3E%3C/svg%3E">
+<style>
+/* Шрифти — лише встановлені в macOS (ParaType, з кирилицею): сторінка працює без інтернету */
+:root {
+  --serif: "PT Serif", "Iowan Old Style", Georgia, serif;
+  --caption: "PT Serif Caption", "PT Serif", Georgia, serif;
+  --sans: "PT Sans", "Helvetica Neue", sans-serif;
+  --mono: "PT Mono", ui-monospace, Menlo, monospace;
+
+  --desk: #e9e2d4;
+  --sheet: #fbf8f1;
+  --ink: #1e1a15;
+  --ink-2: #574f44;
+  --ink-3: #8e8575;
+  --rule: #ddd3c1;
+  --rule-2: #cbbfa9;
+  --red: #c4361a;
+  --red-soft: rgba(196, 54, 26, .11);
+  --ochre: #a8720c;
+  --ochre-soft: rgba(168, 114, 12, .13);
+  --green: #3c7346;
+  --wave: rgba(30, 26, 21, .28);
+  --shadow: 0 1px 0 rgba(255, 255, 255, .7) inset, 0 30px 60px -38px rgba(70, 45, 15, .45), 0 2px 6px -2px rgba(70, 45, 15, .12);
+  --grain-opacity: .38;
+  --grain-blend: multiply;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --desk: #12110f;
+    --sheet: #1b1916;
+    --ink: #ece4d6;
+    --ink-2: #b4aa97;
+    --ink-3: #7c7364;
+    --rule: #2f2b25;
+    --rule-2: #3d382f;
+    --red: #ff6a45;
+    --red-soft: rgba(255, 106, 69, .15);
+    --ochre: #e2a93b;
+    --ochre-soft: rgba(226, 169, 59, .15);
+    --green: #7fbb8a;
+    --wave: rgba(236, 228, 214, .26);
+    --shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 30px 60px -30px rgba(0, 0, 0, .8), 0 2px 6px -2px rgba(0, 0, 0, .5);
+    --grain-opacity: .07;
+    --grain-blend: screen;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font: 16px/1.5 var(--sans);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+/* Зерно паперу */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: var(--grain-blend);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .45 0 0 0 0 .38 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Тонка лінія прогресу вгорі */
+.progress-line { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: var(--rule); z-index: 40; }
+.progress-line i { display: block; height: 100%; width: 0; background: var(--red); transition: width .4s cubic-bezier(.2, .8, .2, 1); }
+
+header {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 30px 24px 18px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 16px;
+}
+.mark { font-family: var(--serif); font-size: 21px; letter-spacing: -.01em; }
+.mark b { font-weight: 700; }
+.mark em { color: var(--red); font-style: italic; margin-left: 4px; }
+.counter { text-align: center; font-family: var(--serif); line-height: 1; }
+.counter strong { font-size: 40px; font-weight: 400; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.counter span { color: var(--ink-3); font-size: 20px; }
+.counter small { display: block; margin-top: 6px; font: 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.eta { justify-self: end; text-align: right; font: 12px/1.6 var(--mono); color: var(--ink-3); }
+.eta b { color: var(--ink-2); font-weight: 400; }
+
+main { max-width: 940px; margin: 0 auto; padding: 0 24px 40px; }
+
+/* Аркуш-гранка з червоним полем */
+.sheet {
+  position: relative;
+  background: var(--sheet);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: 30px 48px 26px 92px;
+  min-height: 420px;
+}
+.sheet::before {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: 64px;
+  width: 1px;
+  background: var(--red);
+  opacity: .45;
+}
+.sheet.swap .page { animation: rise .24s cubic-bezier(.2, .8, .2, 1); }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.margin-no {
+  position: absolute; left: 0; top: 30px; width: 64px;
+  text-align: center;
+  font: 11px/1.3 var(--mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.margin-no b { display: block; font: 400 22px/1.1 var(--serif); color: var(--ink-2); letter-spacing: -.01em; margin-top: 2px; }
+
+.stamp {
+  position: absolute; top: 22px; right: 26px;
+  font: 700 12px/1 var(--mono);
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  padding: 7px 10px 6px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  transform: rotate(-5deg);
+  opacity: .78;
+  display: none;
+}
+.stamp.ok { color: var(--green); display: block; }
+.stamp.edited { color: var(--red); display: block; }
+.stamp.no_speech { color: var(--ink-3); display: block; }
+.stamp.unsure { color: var(--ochre); display: block; }
+.stamp.pop { animation: stamp .32s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes stamp { from { transform: rotate(-5deg) scale(1.6); opacity: 0; } to { transform: rotate(-5deg) scale(1); opacity: .78; } }
+
+.meta { font: 12px/1.4 var(--mono); color: var(--ink-3); letter-spacing: .04em; display: flex; flex-wrap: wrap; gap: 4px 14px; padding-right: 150px; }
+.meta .warn { color: var(--ochre); }
+
+.context {
+  margin: 14px 0 0;
+  font: italic 15px/1.45 var(--serif);
+  color: var(--ink-3);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 0;
+}
+.context:empty { display: none; }
+.context::before { content: "↳ попереднє: "; font-style: normal; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; }
+
+/* Плеєр */
+.player { display: flex; align-items: center; gap: 14px; margin: 18px 0 8px; }
+.play {
+  flex: none;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--ink);
+  color: var(--sheet);
+  display: grid; place-items: center;
+  cursor: pointer;
+  transition: background .15s, transform .15s;
+}
+.play:hover { transform: scale(1.05); }
+.play.playing { background: var(--red); }
+.play.hint { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--red-soft); } 50% { box-shadow: 0 0 0 10px var(--red-soft); } }
+.play svg { width: 16px; height: 16px; fill: currentColor; }
+.wave-wrap { position: relative; flex: 1; height: 56px; cursor: pointer; }
+.wave-wrap canvas { width: 100%; height: 100%; display: block; }
+.wave-wrap .empty { position: absolute; inset: 0; display: grid; place-items: center; font: 12px var(--mono); color: var(--ink-3); }
+.time { flex: none; font: 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 78px; text-align: right; }
+.speeds { flex: none; display: flex; gap: 2px; background: var(--desk); padding: 3px; border-radius: 999px; }
+.speeds button {
+  border: 0; background: transparent; color: var(--ink-3);
+  font: 11px/1 var(--mono); padding: 6px 7px; border-radius: 999px; cursor: pointer;
+}
+.speeds button.on { background: var(--sheet); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+
+/* Редактор з підсвіткою за текстом */
+.editor { position: relative; margin: 14px 0 4px; }
+.editor textarea, .editor .backdrop {
+  font: 27px/1.55 var(--serif);
+  letter-spacing: 0;
+  padding: 6px 0 8px;
+  margin: 0;
+  border: 0;
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 4;
+}
+.editor .backdrop { position: absolute; inset: 0; color: transparent; pointer-events: none; overflow: hidden; }
+.editor textarea {
+  position: relative;
+  display: block;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--red);
+  outline: none;
+  min-height: 1.55em;
+}
+.editor textarea::placeholder { color: var(--ink-3); font-style: italic; }
+.editor textarea::selection { background: var(--red-soft); }
+.backdrop mark { color: transparent; background: none; border-radius: 2px; }
+/* Інакше, ніж почув Parakeet — червоним олівцем */
+.backdrop mark.d { background: var(--red-soft); text-decoration: underline wavy var(--red); text-decoration-thickness: 1.5px; text-underline-offset: 6px; text-decoration-skip-ink: none; }
+/* Parakeet і whisper почули по-різному — пунктиром */
+.backdrop mark.w { text-decoration: underline dotted var(--ochre); text-decoration-thickness: 2px; text-underline-offset: 7px; }
+.rule-under { height: 1px; background: var(--rule); margin-bottom: 10px; }
+
+.note {
+  margin: 12px 0 2px;
+  padding: 8px 14px 8px 12px;
+  border-left: 3px solid var(--ochre);
+  background: var(--ochre-soft);
+  border-radius: 0 3px 3px 0;
+  font: italic 15px/1.5 var(--serif);
+  color: var(--ink-2);
+}
+.note::before { content: "✎ "; font-style: normal; color: var(--ochre); }
+.note:empty { display: none; }
+
+.legend { font: 11px/1.6 var(--mono); color: var(--ink-3); letter-spacing: .03em; display: flex; flex-wrap: wrap; gap: 2px 16px; }
+.legend i { font-style: normal; }
+.legend .ld { text-decoration: underline wavy var(--red); text-underline-offset: 3px; color: var(--ink-2); }
+.legend .lw { text-decoration: underline dotted var(--ochre); text-decoration-thickness: 2px; text-underline-offset: 3px; color: var(--ink-2); }
+
+/* Варіанти: взяти одним натисканням */
+.sources { margin: 22px 0 0; border-top: 1px solid var(--rule); }
+.source {
+  display: grid;
+  grid-template-columns: 36px 84px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 8px;
+  margin: 0 -8px;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.source:hover { background: var(--desk); }
+.source kbd {
+  font: 11px/1 var(--mono);
+  color: var(--ink-3);
+  border: 1px solid var(--rule-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 3px 5px 2px;
+  text-align: center;
+}
+.source .name { font: 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
+.source .text { font: 16px/1.5 var(--caption); color: var(--ink-2); }
+.source .text .x { color: var(--red); background: var(--red-soft); border-radius: 2px; padding: 0 1px; }
+.source .same { font: 12px var(--mono); color: var(--ink-3); }
+.source.flash { background: var(--red-soft); }
+
+.actions { display: flex; align-items: center; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
+.actions .spacer { flex: 1; }
+.btn {
+  border: 1px solid var(--rule-2);
+  background: transparent;
+  color: var(--ink-2);
+  font: 14px/1 var(--sans);
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.btn:hover { background: var(--desk); color: var(--ink); }
+.btn kbd { font: 11px/1 var(--mono); color: var(--ink-3); }
+.btn.unsure:hover { border-color: var(--ochre); color: var(--ochre); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--sheet); padding: 11px 20px; font-weight: 700; }
+.btn.primary kbd { color: inherit; opacity: .6; }
+.btn.primary:hover { background: var(--red); border-color: var(--red); }
+
+/* Карта прогресу по днях */
+.map { margin: 28px 2px 0; display: flex; flex-direction: column; gap: 10px; }
+.day { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: start; }
+.day .label { font: 11px/14px var(--mono); color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; }
+.day .label b { font-weight: 400; color: var(--ink-2); }
+.cells { display: flex; flex-wrap: wrap; gap: 3px; }
+.cell {
+  width: 12px; height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--rule-2);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: transform .12s;
+}
+.cell:hover { transform: scale(1.25); }
+.cell.ok { background: var(--ink-2); border-color: var(--ink-2); }
+.cell.edited { background: var(--red); border-color: var(--red); }
+.cell.no_speech { background: repeating-linear-gradient(135deg, var(--rule-2) 0 2px, transparent 2px 4px); }
+.cell.unsure { background: var(--ochre); border-color: var(--ochre); }
+.cell.current { outline: 2px solid var(--red); outline-offset: 2px; }
+.map-legend { margin: 14px 0 0 86px; font: 11px/1.6 var(--mono); color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.map-legend span::before { content: ""; display: inline-block; width: 9px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--rule-2); }
+.map-legend .ok::before { background: var(--ink-2); border-color: var(--ink-2); }
+.map-legend .edited::before { background: var(--red); border-color: var(--red); }
+.map-legend .unsure::before { background: var(--ochre); border-color: var(--ochre); }
+.map-legend .no_speech::before { background: repeating-linear-gradient(135deg, var(--rule-2) 0 2px, transparent 2px 4px); }
+
+.keys {
+  margin: 30px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule-2);
+  font: 12px/2 var(--mono);
+  color: var(--ink-3);
+  display: flex; flex-wrap: wrap; gap: 0 22px;
+}
+.keys kbd { font: inherit; color: var(--ink-2); }
+.footnote { margin-top: 6px; font: 11px/1.6 var(--mono); color: var(--ink-3); opacity: .8; word-break: break-all; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 26px;
+  transform: translate(-50%, 20px);
+  opacity: 0;
+  background: var(--ink); color: var(--sheet);
+  font: 13px/1.4 var(--sans);
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .4);
+  transition: opacity .2s, transform .2s;
+  z-index: 60;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.error { background: var(--red); color: #fff; }
+
+.done { text-align: center; padding: 70px 20px 60px; }
+.done h1 { font: 400 44px/1.1 var(--serif); margin: 0 0 12px; letter-spacing: -.02em; }
+.done h1 em { color: var(--red); }
+.done p { font: 17px/1.6 var(--serif); color: var(--ink-2); margin: 4px 0; }
+.done code { font: 13px var(--mono); color: var(--ink-3); }
+.hidden { display: none !important; }
+
+@media (max-width: 720px) {
+  header { grid-template-columns: 1fr auto; }
+  .eta { display: none; }
+  .sheet { padding: 22px 18px 20px 52px; }
+  .sheet::before { left: 38px; }
+  .margin-no { width: 38px; font-size: 10px; }
+  .margin-no b { font-size: 16px; }
+  .meta { padding-right: 0; margin-top: 34px; }
+  .editor textarea, .editor .backdrop { font-size: 22px; }
+  .source { grid-template-columns: 30px 1fr; }
+  .source .name { display: none; }
+  .speeds { display: none; }
+  .day { grid-template-columns: 1fr; gap: 4px; }
+  .map-legend { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="progress-line"><i id="progressFill"></i></div>
+
+<header>
+  <div class="mark"><b>Holos</b><em>коректура</em></div>
+  <div class="counter"><strong id="doneCount">0</strong><span> / <span id="totalCount">0</span></span><small>розмічено</small></div>
+  <div class="eta" id="eta"></div>
+</header>
+
+<main>
+  <section class="sheet" id="sheet">
+    <div class="page" id="page">
+      <div class="margin-no">№<b id="number">—</b></div>
+      <div class="stamp" id="stamp"></div>
+      <div class="meta" id="meta"></div>
+      <p class="context" id="context"></p>
+
+      <div class="player">
+        <button class="play" id="play" title="Слухати (⇥ — з початку, esc — пауза)" aria-label="Слухати">
+          <svg id="playIcon" viewBox="0 0 16 16"><path d="M4 2.5v11l9.5-5.5z"/></svg>
+        </button>
+        <div class="wave-wrap" id="waveWrap"><canvas id="wave"></canvas><div class="empty hidden" id="waveEmpty">аудіо немає</div></div>
+        <div class="time" id="time">0:00 / 0:00</div>
+        <div class="speeds" id="speeds"></div>
+      </div>
+
+      <div class="editor">
+        <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+        <textarea id="text" rows="1" spellcheck="false" autocomplete="off" placeholder="Мовлення немає — просто ↵"></textarea>
+      </div>
+      <div class="rule-under"></div>
+      <div class="legend"><span><i class="ld">так</i> — інакше, ніж почув Parakeet</span><span><i class="lw">так</i> — whisper почув інакше</span></div>
+      <p class="note" id="note"></p>
+
+      <div class="sources" id="sources"></div>
+
+      <div class="actions">
+        <button class="btn" id="prev" title="Попередній без збереження">← <kbd>⌥↑</kbd></button>
+        <button class="btn" id="next" title="Наступний без збереження"><kbd>⌥↓</kbd> →</button>
+        <span class="spacer"></span>
+        <button class="btn" id="noSpeech">Без мовлення <kbd>⌥N</kbd></button>
+        <button class="btn unsure" id="unsure">Сумнів <kbd>⌥U</kbd></button>
+        <button class="btn primary" id="save">Зберегти й далі <kbd>↵</kbd></button>
+      </div>
+    </div>
+
+    <div class="done hidden" id="done">
+      <h1>Усе <em>розмічено</em></h1>
+      <p id="doneStats"></p>
+      <p><code id="donePath"></code></p>
+    </div>
+  </section>
+
+  <nav class="map" id="map" aria-label="Усі записи"></nav>
+  <div class="map-legend">
+    <span class="ok">як у чернетці</span><span class="edited">з правками</span><span class="unsure">сумнів</span><span class="no_speech">без мовлення</span><span>ще не розмічено</span>
+  </div>
+
+  <div class="keys">
+    <span><kbd>↵</kbd> зберегти й далі</span>
+    <span><kbd>⇥</kbd> слухати з початку</span>
+    <span><kbd>esc</kbd> пауза</span>
+    <span><kbd>⌥1 ⌥2 ⌥3</kbd> взяти Parakeet / whisper / Gemma</span>
+    <span><kbd>⌥0</kbd> повернути чернетку</span>
+    <span><kbd>⌥N</kbd> без мовлення</span>
+    <span><kbd>⌥U</kbd> сумнів</span>
+    <span><kbd>⌥↑ ⌥↓</kbd> попередній / наступний</span>
+  </div>
+  <div class="footnote" id="footnote"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  sheet: $("sheet"), page: $("page"), done: $("done"), number: $("number"), stamp: $("stamp"), meta: $("meta"),
+  context: $("context"), play: $("play"), playIcon: $("playIcon"), waveWrap: $("waveWrap"), wave: $("wave"),
+  waveEmpty: $("waveEmpty"), time: $("time"), speeds: $("speeds"), text: $("text"), backdrop: $("backdrop"),
+  note: $("note"), sources: $("sources"), map: $("map"), toast: $("toast"), progress: $("progressFill"),
+  doneCount: $("doneCount"), totalCount: $("totalCount"), eta: $("eta"), footnote: $("footnote"),
+};
+
+const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
+const STAMPS = { ok: "перевірено", edited: "виправлено", no_speech: "без мовлення", unsure: "сумнів" };
+const PLAY = '<path d="M4 2.5v11l9.5-5.5z"/>';
+const PAUSE = '<path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/>';
+
+const state = {
+  entries: [],
+  index: 0,
+  journal: "",
+  rate: Number(storage("rate")) || 1,
+  audio: new Audio(),
+  cache: new Map(),       // id → {url, peaks, duration} | {missing: true}
+  loading: new Map(),     // id → Promise
+  current: null,          // дані аудіо поточного запису
+  token: 0,
+  hover: null,
+  needsGesture: false,
+  saves: [],              // моменти збережень у цій сесії — для оцінки часу
+};
+state.audio.preservesPitch = true;
+state.audio.webkitPreservesPitch = true;
+
+function storage(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem("holos-label-" + key);
+    localStorage.setItem("holos-label-" + key, String(value));
+  } catch (_) { return null; }
+}
+
+// ---------- Слова й різниця між варіантами ----------
+
+const WORD = /[\p{L}\p{N}]+(?:['’ʼ\-][\p{L}\p{N}]+)*/gu;
+
+function words(text) {
+  const result = [];
+  for (const match of (text || "").matchAll(WORD)) {
+    result.push({ start: match.index, end: match.index + match[0].length, norm: match[0].toLowerCase().replace(/[’ʼ]/g, "'") });
+  }
+  return result;
+}
+
+/** Які слова `a` є й у `b` у тому самому порядку (найдовша спільна підпослідовність) */
+function matched(a, b) {
+  const n = a.length, m = b.length;
+  const table = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      table[i][j] = a[i].norm === b[j].norm ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const result = new Array(n).fill(false);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i].norm === b[j].norm) { result[i] = true; i++; j++; }
+    else if (table[i + 1][j] >= table[i][j + 1]) i++;
+    else j++;
+  }
+  return result;
+}
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/** Текст із позначеними словами: classOf(і) → клас або null */
+function markup(text, tokens, classOf, tag) {
+  let html = "", last = 0;
+  tokens.forEach((token, i) => {
+    const cls = classOf(i);
+    html += escapeHtml(text.slice(last, token.start));
+    const word = escapeHtml(text.slice(token.start, token.end));
+    html += cls ? `<${tag} class="${cls}">${word}</${tag}>` : word;
+    last = token.end;
+  });
+  return html + escapeHtml(text.slice(last));
+}
+
+// ---------- Дані ----------
+
+const entry = () => state.entries[state.index];
+const draftOf = (e) => (e.draft ?? e.parakeet ?? "");
+const statusOf = (e) => {
+  const r = e.reference;
+  if (!r) return null;
+  if (r.status === "ok" && r.edited) return "edited";
+  return r.status;
+};
+
+async function load() {
+  const response = await fetch("/api/entries", { cache: "no-store" });
+  const data = await response.json();
+  state.entries = data.entries;
+  state.journal = data.journal;
+  els.footnote.textContent = "Еталон зберігається одразу після кожного ↵: " + data.journal + "/reference.jsonl";
+  buildSpeeds();
+  buildMap();
+  const remembered = state.entries.findIndex((e) => e.id === storage("position"));
+  const firstOpen = state.entries.findIndex((e) => !e.reference);
+  const start = remembered >= 0 && !state.entries[remembered].reference ? remembered : firstOpen;
+  if (start < 0) { showDone(); show(state.entries.length - 1, { silent: true }); return; }
+  show(start);
+}
+
+// ---------- Показ запису ----------
+
+function show(index, options = {}) {
+  if (!state.entries.length) return;
+  state.index = Math.max(0, Math.min(state.entries.length - 1, index));
+  const e = entry();
+  storage("position", e.id);
+  els.done.classList.add("hidden");
+  els.page.classList.remove("hidden");
+
+  els.number.textContent = state.index + 1;
+  const date = new Date(e.date);
+  const parts = [
+    date.toLocaleDateString("uk-UA", { weekday: "short", day: "numeric", month: "short" }),
+    date.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }),
+    seconds(e.seconds) + " с",
+  ];
+  let meta = parts.map(escapeHtml).join(" · ");
+  if (e.correction && e.correction !== "виправлено" && e.correction !== "без змін") {
+    meta += ` <span class="warn">· Gemma: ${escapeHtml(e.correction)}</span>`;
+  }
+  els.meta.innerHTML = meta;
+
+  const status = statusOf(e);
+  els.stamp.className = "stamp" + (status ? " " + status : "");
+  els.stamp.textContent = status ? STAMPS[status] : "";
+
+  // Попереднє диктування — якщо воно було щойно, це часто продовження думки
+  const previous = state.entries[state.index - 1];
+  const close = previous && (date - new Date(previous.date)) < 10 * 60 * 1000;
+  els.context.textContent = close ? (previous.reference ? previous.reference.text : draftOf(previous)) : "";
+
+  els.text.value = e.reference ? e.reference.text : draftOf(e);
+  els.note.textContent = e.note || "";
+  refreshText();
+  placeCaretAtEnd();
+
+  // Сторінку прокрутили до карти — наступний запис має бути на виду
+  if (els.sheet.getBoundingClientRect().top < 0) els.sheet.scrollIntoView({ block: "start", behavior: "smooth" });
+  if (!options.silent) {
+    els.sheet.classList.remove("swap");
+    void els.sheet.offsetWidth;
+    els.sheet.classList.add("swap");
+  }
+  markCurrent();
+  updateCounts();
+  playEntry(e, !options.silent);
+  prefetch();
+}
+
+function seconds(value) {
+  return Number(value || 0).toLocaleString("uk-UA", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function placeCaretAtEnd() {
+  els.text.focus({ preventScroll: true });
+  const end = els.text.value.length;
+  els.text.setSelectionRange(end, end);
+}
+
+/** Висота поля, підсвітка розбіжностей і варіанти — після кожної зміни тексту */
+function refreshText() {
+  const e = entry();
+  const text = els.text.value;
+  els.text.style.height = "auto";
+  els.text.style.height = els.text.scrollHeight + "px";
+
+  const tokens = words(text);
+  const heard = matched(tokens, words(e.parakeet));
+  const whisperTokens = words(e.whisper || "");
+  const whisperHeard = e.whisper ? matched(tokens, whisperTokens) : tokens.map(() => true);
+  els.backdrop.innerHTML = markup(text, tokens, (i) => (!heard[i] ? "d" : !whisperHeard[i] ? "w" : null), "mark") + "\n ";
+
+  renderSources(text, tokens);
+}
+
+function renderSources(text, tokens) {
+  const e = entry();
+  const rows = [
+    { key: "0", name: "чернетка", value: draftOf(e) },
+    { key: "1", name: "Parakeet", value: e.parakeet },
+    { key: "2", name: "whisper", value: e.whisper },
+    { key: "3", name: "Gemma", value: e.gemma },
+  ].filter((row) => row.value !== null && row.value !== undefined && (row.key !== "0" || e.draft != null));
+  els.sources.innerHTML = rows.map((row) => {
+    const own = words(row.value);
+    const same = row.value.trim() === text.trim();
+    const hit = matched(own, tokens);
+    const body = row.value === ""
+      ? '<span class="same">— порожньо —</span>'
+      : same ? `${escapeHtml(row.value)} <span class="same">· як зараз</span>`
+      : markup(row.value, own, (i) => (hit[i] ? null : "x"), "span");
+    return `<div class="source" data-key="${row.key}"><kbd>⌥${row.key}</kbd><span class="name">${row.name}</span><span class="text">${body}</span></div>`;
+  }).join("");
+}
+
+function take(key) {
+  const e = entry();
+  const value = { "0": e.draft ?? null, "1": e.parakeet, "2": e.whisper, "3": e.gemma }[key];
+  if (value === null || value === undefined) return;
+  els.text.value = value;
+  refreshText();
+  placeCaretAtEnd();
+  const row = els.sources.querySelector(`[data-key="${key}"]`);
+  if (row) { row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 260); }
+}
+
+// ---------- Аудіо ----------
+
+let audioContext = null;
+function context() {
+  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  return audioContext;
+}
+
+function fetchAudio(id) {
+  if (state.cache.has(id)) return Promise.resolve(state.cache.get(id));
+  if (state.loading.has(id)) return state.loading.get(id);
+  const promise = (async () => {
+    const response = await fetch(`/audio/${id}.wav`);
+    if (!response.ok) return { missing: true };
+    const bytes = await response.arrayBuffer();
+    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+    let peaks = new Float32Array(0), duration = 0;
+    try {
+      const buffer = await context().decodeAudioData(bytes.slice(0));
+      duration = buffer.duration;
+      peaks = computePeaks(buffer.getChannelData(0), 900);
+    } catch (_) { /* порожній запис */ }
+    return duration > 0 ? { url, peaks, duration } : { missing: true, url };
+  })().then((value) => {
+    state.cache.set(id, value);
+    state.loading.delete(id);
+    trimCache();
+    return value;
+  }, () => {
+    state.loading.delete(id);
+    return { missing: true };
+  });
+  state.loading.set(id, promise);
+  return promise;
+}
+
+function trimCache() {
+  const keep = new Set(state.entries.slice(Math.max(0, state.index - 3), state.index + 4).map((e) => e.id));
+  for (const [id, value] of state.cache) {
+    if (state.cache.size <= 12) break;
+    if (!keep.has(id)) {
+      if (value.url) URL.revokeObjectURL(value.url);
+      state.cache.delete(id);
+    }
+  }
+}
+
+function computePeaks(samples, buckets) {
+  const peaks = new Float32Array(buckets);
+  const size = samples.length / buckets;
+  let max = 0;
+  for (let b = 0; b < buckets; b++) {
+    const from = Math.floor(b * size), to = Math.max(from + 1, Math.floor((b + 1) * size));
+    let sum = 0;
+    for (let i = from; i < to && i < samples.length; i++) sum += samples[i] * samples[i];
+    peaks[b] = Math.sqrt(sum / (to - from));
+    if (peaks[b] > max) max = peaks[b];
+  }
+  if (max > 0) for (let b = 0; b < buckets; b++) peaks[b] = Math.pow(peaks[b] / max, 0.7);
+  return peaks;
+}
+
+function prefetch() {
+  for (let i = state.index + 1; i <= state.index + 2 && i < state.entries.length; i++) fetchAudio(state.entries[i].id);
+}
+
+async function playEntry(e, autoplay) {
+  const token = ++state.token;
+  state.audio.pause();
+  state.current = null;
+  setPlaying(false);
+  drawWave();
+  const data = await fetchAudio(e.id);
+  if (token !== state.token) return;
+  state.current = data.missing ? null : data;
+  els.waveEmpty.classList.toggle("hidden", !data.missing);
+  if (data.missing) { drawWave(); els.time.textContent = "—"; return; }
+  state.audio.src = data.url;
+  state.audio.playbackRate = state.rate;
+  drawWave();
+  updateTime();
+  if (autoplay) play(0);
+}
+
+function play(from) {
+  if (!state.current) return;
+  if (from !== undefined) state.audio.currentTime = from;
+  state.audio.playbackRate = state.rate;
+  const attempt = state.audio.play();
+  if (attempt && attempt.catch) {
+    attempt.then(() => { state.needsGesture = false; els.play.classList.remove("hint"); })
+      .catch(() => { state.needsGesture = true; els.play.classList.add("hint"); });
+  }
+}
+
+function togglePlay() {
+  if (!state.current) return;
+  if (state.audio.paused) play(state.audio.ended ? 0 : undefined); else state.audio.pause();
+}
+
+function setPlaying(on) {
+  els.play.classList.toggle("playing", on);
+  els.playIcon.innerHTML = on ? PAUSE : PLAY;
+}
+
+state.audio.addEventListener("play", () => { setPlaying(true); tick(); });
+state.audio.addEventListener("pause", () => { setPlaying(false); drawWave(); updateTime(); });
+state.audio.addEventListener("ended", () => { setPlaying(false); drawWave(); updateTime(); });
+
+function tick() {
+  drawWave();
+  updateTime();
+  if (!state.audio.paused) requestAnimationFrame(tick);
+}
+
+function clock(value) {
+  const total = Math.max(0, value || 0);
+  const m = Math.floor(total / 60), s = Math.floor(total % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function updateTime() {
+  if (!state.current) return;
+  els.time.textContent = `${clock(state.audio.currentTime)} / ${clock(state.current.duration)}`;
+}
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function drawWave() {
+  const canvas = els.wave;
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.round(canvas.clientWidth * ratio), height = Math.round(canvas.clientHeight * ratio);
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  const g = canvas.getContext("2d");
+  g.clearRect(0, 0, width, height);
+  const bar = 2 * ratio, gap = 2 * ratio;
+  const count = Math.max(1, Math.floor((width + gap) / (bar + gap)));
+  const data = state.current;
+  const progress = data && data.duration ? state.audio.currentTime / data.duration : 0;
+  const hover = state.hover;
+  const red = cssVar("--red"), wave = cssVar("--wave"), ink = cssVar("--ink-3");
+  for (let i = 0; i < count; i++) {
+    let value = 0.04;
+    if (data && data.peaks.length) {
+      const from = Math.floor(i / count * data.peaks.length), to = Math.max(from + 1, Math.floor((i + 1) / count * data.peaks.length));
+      let max = 0;
+      for (let k = from; k < to; k++) if (data.peaks[k] > max) max = data.peaks[k];
+      value = Math.max(0.04, max);
+    }
+    const h = Math.max(2 * ratio, value * height * 0.92);
+    const x = i * (bar + gap), y = (height - h) / 2;
+    const position = (i + 0.5) / count;
+    g.fillStyle = data && position <= progress ? red : (hover !== null && position <= hover ? ink : wave);
+    roundRect(g, x, y, bar, h, bar / 2);
+  }
+  if (data && (progress > 0 || !state.audio.paused)) {
+    g.fillStyle = red;
+    g.fillRect(Math.min(width - ratio, progress * width), 0, ratio, height);
+  }
+}
+
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.fill();
+}
+
+els.waveWrap.addEventListener("mousemove", (event) => {
+  const box = els.waveWrap.getBoundingClientRect();
+  state.hover = (event.clientX - box.left) / box.width;
+  if (state.audio.paused) drawWave();
+});
+els.waveWrap.addEventListener("mouseleave", () => { state.hover = null; if (state.audio.paused) drawWave(); });
+els.waveWrap.addEventListener("click", (event) => {
+  if (!state.current) return;
+  const box = els.waveWrap.getBoundingClientRect();
+  play(Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * state.current.duration);
+  els.text.focus({ preventScroll: true });
+});
+els.play.addEventListener("click", () => { togglePlay(); els.text.focus({ preventScroll: true }); });
+window.addEventListener("resize", () => { drawWave(); refreshText(); });
+
+function buildSpeeds() {
+  els.speeds.innerHTML = SPEEDS.map((s) => `<button data-rate="${s}">${String(s).replace(".", ",")}×</button>`).join("");
+  els.speeds.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    state.rate = Number(button.dataset.rate);
+    storage("rate", state.rate);
+    state.audio.playbackRate = state.rate;
+    markSpeed();
+    els.text.focus({ preventScroll: true });
+  });
+  markSpeed();
+}
+function markSpeed() {
+  for (const button of els.speeds.children) button.classList.toggle("on", Number(button.dataset.rate) === state.rate);
+}
+
+// ---------- Збереження ----------
+
+async function save(status) {
+  const e = entry();
+  if (!e) return;
+  let text = els.text.value.replace(/\s+/g, " ").trim();
+  if (status === "ok" && !text) status = "no_speech";
+  if (status === "no_speech") text = "";
+  const previous = e.reference;
+  const draft = draftOf(e);
+  // Одразу далі, не чекаючи диска; якщо запис не вдався — запис знову стає нерозміченим
+  e.reference = { text, status, edited: text !== draft };
+  state.saves.push(Date.now());
+  updateCell(state.index);
+  const savedIndex = state.index;
+  goToNextOpen();
+  try {
+    const response = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: e.id, text, status }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
+    e.reference = result.reference;
+    updateCell(savedIndex);
+  } catch (error) {
+    e.reference = previous;
+    updateCell(savedIndex);
+    updateCounts();
+    toast(`№${savedIndex + 1} не збережено: ${error.message}. Сервер label.py працює?`, true);
+  }
+}
+
+function goToNextOpen() {
+  const n = state.entries.length;
+  for (let step = 1; step <= n; step++) {
+    const i = (state.index + step) % n;
+    if (!state.entries[i].reference) {
+      if (i < state.index) toast("Дійшли до кінця — повертаюся до пропущених");
+      show(i);
+      return;
+    }
+  }
+  updateCounts();
+  showDone();
+}
+
+function showDone() {
+  state.audio.pause();
+  const all = state.entries.length;
+  const done = state.entries.map(statusOf);
+  const edited = done.filter((s) => s === "edited").length;
+  const silent = done.filter((s) => s === "no_speech").length;
+  const unsure = done.filter((s) => s === "unsure").length;
+  els.page.classList.add("hidden");
+  els.done.classList.remove("hidden");
+  $("doneStats").textContent = `${all} записів: з правками — ${edited}, без мовлення — ${silent}, сумнівних — ${unsure}.`;
+  $("donePath").textContent = state.journal + "/reference.jsonl";
+  markCurrent(-1);
+}
+
+let toastTimer = 0;
+function toast(message, error = false) {
+  els.toast.textContent = message;
+  els.toast.classList.toggle("error", error);
+  els.toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove("show"), error ? 6000 : 2200);
+}
+
+// ---------- Карта й лічильники ----------
+
+function buildMap() {
+  const days = new Map();
+  state.entries.forEach((e, i) => {
+    const key = new Date(e.date).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
+    if (!days.has(key)) days.set(key, []);
+    days.get(key).push(i);
+  });
+  els.map.innerHTML = [...days].map(([day, list]) => {
+    const weekday = new Date(state.entries[list[0]].date).toLocaleDateString("uk-UA", { weekday: "short" });
+    const cells = list.map((i) => {
+      const e = state.entries[i];
+      const time = new Date(e.date).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+      const title = `№${i + 1} · ${time} · ${(draftOf(e) || "без тексту").slice(0, 60)}`;
+      return `<button class="cell" data-i="${i}" title="${escapeHtml(title)}"></button>`;
+    }).join("");
+    return `<div class="day"><div class="label"><b>${day}</b> ${weekday}</div><div class="cells">${cells}</div></div>`;
+  }).join("");
+  els.map.addEventListener("click", (event) => {
+    const cell = event.target.closest(".cell");
+    if (cell) show(Number(cell.dataset.i));
+  });
+  state.entries.forEach((_, i) => updateCell(i));
+}
+
+function updateCell(i) {
+  const cell = els.map.querySelector(`[data-i="${i}"]`);
+  if (!cell) return;
+  cell.classList.remove("ok", "edited", "no_speech", "unsure");
+  const status = statusOf(state.entries[i]);
+  if (status) cell.classList.add(status);
+}
+
+function markCurrent(index = state.index) {
+  els.map.querySelectorAll(".cell.current").forEach((cell) => cell.classList.remove("current"));
+  const cell = els.map.querySelector(`[data-i="${index}"]`);
+  if (cell) cell.classList.add("current");
+}
+
+function updateCounts() {
+  const total = state.entries.length;
+  const done = state.entries.filter((e) => e.reference).length;
+  els.doneCount.textContent = done;
+  els.totalCount.textContent = total;
+  els.progress.style.width = (total ? done / total * 100 : 0) + "%";
+  const left = total - done;
+  // Скільки ще: медіана проміжків між збереженнями в цій сесії (без перерв понад 2 хв)
+  const gaps = state.saves.slice(1).map((t, i) => (t - state.saves[i]) / 1000).filter((s) => s < 120).sort((a, b) => a - b);
+  let eta = "";
+  if (left === 0) eta = "усе готово";
+  else if (gaps.length >= 3) {
+    const pace = gaps[Math.floor(gaps.length / 2)];
+    const minutes = Math.max(1, Math.round(left * pace / 60));
+    eta = `лишилось <b>${left}</b><br>≈ <b>${minutes} хв</b> у такому темпі`;
+  } else eta = `лишилось <b>${left}</b>`;
+  els.eta.innerHTML = eta;
+}
+
+// ---------- Клавіші ----------
+
+els.text.addEventListener("input", refreshText);
+
+document.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  const page = !els.page.classList.contains("hidden");
+  if (event.key === "Enter" && !event.shiftKey && !event.altKey && page) {
+    event.preventDefault(); save("ok"); return;
+  }
+  if (event.metaKey && event.code === "KeyS" && page) { event.preventDefault(); save("ok"); return; }
+  if (event.key === "Tab" && page) { event.preventDefault(); play(0); return; }
+  if (event.key === "Escape" && page) { event.preventDefault(); togglePlay(); return; }
+  if (event.altKey && !event.metaKey && !event.ctrlKey) {
+    const digit = /^Digit([0-3])$/.exec(event.code);
+    if (digit && page) { event.preventDefault(); take(digit[1]); return; }
+    if (event.code === "KeyN" && page) { event.preventDefault(); save("no_speech"); return; }
+    if (event.code === "KeyU" && page) { event.preventDefault(); save("unsure"); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); show(state.index - 1); return; }
+    if (event.key === "ArrowDown") { event.preventDefault(); show(state.index + 1); return; }
+  }
+}, true);
+
+els.sources.addEventListener("click", (event) => {
+  const row = event.target.closest(".source");
+  if (row) take(row.dataset.key);
+});
+$("save").addEventListener("click", () => save("ok"));
+$("noSpeech").addEventListener("click", () => save("no_speech"));
+$("unsure").addEventListener("click", () => save("unsure"));
+$("prev").addEventListener("click", () => show(state.index - 1));
+$("next").addEventListener("click", () => show(state.index + 1));
+
+load().catch((error) => toast("Не вдалося завантажити журнал: " + error.message, true));
+</script>
+</body>
+</html>
