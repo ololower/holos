@@ -58,6 +58,8 @@ final class ParakeetEngine: SpeechEngine {
         var banRussianLetters = true
         /// Штраф до логіта для токенів з латиницею (0 — без штрафу)
         var latinPenalty: Float = 0
+        /// Фраза українською вийшла зовсім без кирилиці — розпізнати ще раз з таким штрафом латиниці (0 — ні)
+        var latinFallbackPenalty: Float = 4
         /// Штраф порожньому токену: > 0 — модель частіше пише слово, < 0 — частіше мовчить
         var blankPenalty: Float = 0
         /// Тиша на початку й у кінці запису, с
@@ -77,6 +79,7 @@ final class ParakeetEngine: SpeechEngine {
                 case "ukrainianBonus": guard let v = Float(value) else { return nil }; tuning.ukrainianBonus = v
                 case "banRussianLetters": guard let v = Bool(value) else { return nil }; tuning.banRussianLetters = v
                 case "latinPenalty": guard let v = Float(value) else { return nil }; tuning.latinPenalty = v
+                case "latinFallbackPenalty": guard let v = Float(value) else { return nil }; tuning.latinFallbackPenalty = v
                 case "blankPenalty": guard let v = Float(value) else { return nil }; tuning.blankPenalty = v
                 case "padSeconds": guard let v = Double(value) else { return nil }; tuning.padSeconds = v
                 case "peakLevel": guard let v = Float(value) else { return nil }; tuning.peakLevel = v
@@ -141,12 +144,43 @@ final class ParakeetEngine: SpeechEngine {
             samples = silence + samples + silence
         }
         do {
-            let text = try Self.segments(samples).map { try decode($0, bias: bias) }.joined(separator: " ")
+            var text = try recognize(samples, bias: bias)
+            if needsLatinFallback(text, language: language) {
+                // Уся фраза латиницею, хоча вибрано українську: модель сплутала мову («Okay.» на тиші,
+                // «Jak tam sprawa?»). Той самий звук ще раз, латиниця зі штрафом — або кирилиця, або нічого
+                var strict = tuning
+                strict.latinPenalty = tuning.latinFallbackPenalty
+                text = try recognize(samples, bias: LanguageBias(language: language, tuning: strict))
+                Log.dictation.info("Parakeet: фраза без кирилиці — розпізнано ще раз зі штрафом латиниці")
+            }
             return Transcriber.clean(text)
         } catch {
             Log.dictation.error("\(error.localizedDescription, privacy: .public)")
             return ""
         }
+    }
+
+    private func recognize(_ samples: [Float], bias: LanguageBias?) throws -> String {
+        try Self.segments(samples).map { try decode($0, bias: bias) }.joined(separator: " ")
+    }
+
+    /// Письмо вибраної мови, якщо воно не латинське. Лише для таких мов фраза зовсім латиницею означає,
+    /// що модель сплутала мову; для латинських мов і «auto» фолбеку немає. Мови — ті, що знає Parakeet
+    static func nonLatinScript(_ language: String) -> ClosedRange<UInt32>? {
+        switch language {
+        case "uk", "ru", "bg": return 0x0400...0x04FF // кирилиця
+        case "el": return 0x0370...0x03FF             // грецька
+        default: return nil
+        }
+    }
+
+    /// Мова з нелатинським письмом, а в результаті немає жодної літери цього письма. Заміри на журналі
+    /// (українська): на тиші «Okay.», «Yeah.» з 6 записів із 32 лишився 1, а фрази з кирилицею
+    /// (і Stripe, git у них) не зачіпаються. Інші мови — за тим самим принципом, без замірів
+    private func needsLatinFallback(_ text: String, language: String) -> Bool {
+        guard let script = Self.nonLatinScript(language), tuning.latinFallbackPenalty > tuning.latinPenalty else { return false }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && !trimmed.unicodeScalars.contains { script.contains($0.value) }
     }
 
     // MARK: - Довгі записи
@@ -358,6 +392,13 @@ struct LanguageBias {
             forbidden = { ukrainianOnly.contains($0) }
             favoured = { _ in false }
             bonus = 0
+            latinPenalty = tuning.latinPenalty
+        case "bg" where tuning.latinPenalty != 0, "el" where tuning.latinPenalty != 0:
+            // Без упередження, крім штрафу латиниці (повторне розпізнавання фрази без свого письма)
+            forbidden = { _ in false }
+            favoured = { _ in false }
+            bonus = 0
+            latinPenalty = tuning.latinPenalty
         case let code where Self.latinLanguages.contains(code):
             forbidden = { (0x0400...0x04FF).contains($0.value) } // кирилиця
             favoured = { _ in false }
